@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=58.1.0", "wheel", "numpy>=1.24.2", "torch>=2.1.0", "ninja"]
+build-backend = "setuptools.build_meta"
+[tool.black]
+    py36 = true
+    line-length = 120
+    include = '\.pyi?$'
+    exclude = '''
+    /(
+        \.git
+      | \.hg
+      | \.mypy_cache
+      | \.tox
+      | \.venv
+      | _build
+      | buck-out
+      | build
+      | dist
+    )/
+    '''
+[tool.pylint.'MESSAGES CONTROL']
+    max-line-length = 120
+    disable = '''
+        missing-module-docstring,
+        unused-argument,
+        unused-variable,
+        unused-import,
+        missing-function-docstring,
+        missing-class-docstring,
+        too-few-public-methods,
+        fixme,
+    '''
+[tool.pylint.MASTER]
+    load-plugins = "pylint_pydantic"
+    ignore-paths = [ "point_frustums/ops/rotation_conversions.py" ]

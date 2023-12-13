@@ -1,0 +1,8 @@
+.idea
+.python-version
+.data-root.yaml
+/build/
+/dist/
+
+/point_frustums/*.so
+/point_frustums.egg-info/
