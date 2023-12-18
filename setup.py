@@ -90,7 +90,7 @@ setup(
         "torchvision>=0.15.0",
         "tensorboard>=2.12.2",
         "torch_tb_profiler",
-        "xformers==0.0.20",
+        "xformers==0.0.23",
         "numpy-quaternion",
         "pyquaternion",
         "loguru",
