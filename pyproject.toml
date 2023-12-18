@@ -30,6 +30,3 @@ build-backend = "setuptools.build_meta"
         too-few-public-methods,
         fixme,
     '''
-[tool.pylint.MASTER]
-    load-plugins = "pylint_pydantic"
-    ignore-paths = [ "point_frustums/ops/rotation_conversions.py" ]
