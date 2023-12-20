@@ -209,7 +209,7 @@ class TransformerFrustumEncoder(nn.Module):  # pylint: disable=too-many-instance
             self.dropout = nn.Dropout(dropout)
 
         def forward(self, x) -> torch.Tensor:
-            return self.dropout(self.norm(self.network(x) + x))
+            return self.dropout(self.network(self.norm(x)) + x)
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -295,52 +295,63 @@ class TransformerFrustumEncoder(nn.Module):  # pylint: disable=too-many-instance
         :param counts:
         :return:
         """
-        n_points, n_channels = pc.shape
+        # For brevity, the comments use:
+        #   N := n_points
+        #   M := n_frustums
+        #   I := len(i_unique) (less than M, the number of non-empty frustums)
+        #   P := n_splits_pol
+        #   H := n_heads
+        #   F := n_channels_in
+        #   E := n_channels_embedding
+        #   K := n_channels_per_head
+        #   L := n_channels_projection
+        n_points, _ = pc.shape
         # Apply preceding layer to pointcloud to get the correct embedding size s.t. residual connections are possible.
         if self.fc_pre is not None:
             pc = self.fc_pre(pc)
 
-        # Get BlockDiagonalMask to perform sparse self attention
+        # SELF ATTENTION (THE POINTCLOUD IS ENRICHED WITH THE FRUSTUM CONTEXT)
+        # Create BlockDiagonalMask to perform sparse self attention
         mask = attn_bias.BlockDiagonalMask.from_seqlens(counts, counts)
 
-        # Preprocess pointcloud dimension for encoder blocks to be explicit in terms of the number of heads.
+        # Preprocess PC dimension for encoder blocks to be explicit w.r.t. the number of heads [1, N, H, K]
         pc = pc.reshape([1, n_points, self.n_heads, self.n_channels_per_head])
 
-        # Iteratively feed pointcloud through encoder blocks
+        # Iteratively feed PC through layers
         for qkv, ffn, norm in zip(self.qvk_self_attention, self.ffn_self_attention, self.norm_self_attention):
-            # Perform self-attention between points [N, pc_feats] within frustums
-            #   Encode point cloud as query, key and value of dim [N, K]
-            # The linear layer operates only on the last dimension -> Do not mind the n_heads dimension!
-            q, k, v = qkv(pc).reshape([1, n_points, self.n_heads, 3, self.n_channels_per_head]).unbind(-2)
-            #   Perform sparse self attention with residual connection
-            pc = norm(memory_efficient_attention(query=q, key=k, value=v, attn_bias=mask, p=self.dropout) + pc)
-
-            # Apply feed forward network (2 layers with dropout, non-linearity, residual connection and layer-norm)
+            # Normalize and then encode PC as query, key and value [1, N, H, K]
+            q, k, v = qkv(norm(pc)).reshape([1, n_points, self.n_heads, 3, self.n_channels_per_head]).unbind(-2)
+            # Evaluate self-attention and residual connection [1, N, H, K]
+            pc = memory_efficient_attention(query=q, key=k, value=v, attn_bias=mask, p=self.dropout) + pc
+            # Apply FFN (norm, fully connected network, residual connection, dropout)
             pc = ffn(pc)
-
-        # Postprocess pointcloud dimension to be independent of the number of heads.
+        # Stack heads
         pc = pc.reshape([1, n_points, self.n_channels_embedding])
 
-        # Perform cross attention between network parameter and self-attended pointcloud
-        #   Encode self-attended PC [N, K] to key and value, using the network parameter as query
-        k, v = self.kv_cross_attention(pc).reshape([1, n_points, 1, 2, self.n_channels_projection]).unbind(-2)
-
-        # Create a Mask that links nonempty frustums to all points that fall within the latter.
+        # CROSS ATTENTION (DECODER QUERIES THE ENRICHED POINTCLOUD)
+        # Create BlockDiagonalMask that links nonempty frustums to all the points assigned to the latter.
         mask = attn_bias.BlockDiagonalMask.from_seqlens(len(i_unique) * [1], counts)
-
-        # Perform sparse cross attention:
-        #   Q: [1, M, 1, L]   |   K, V: [1, N, 1, L]   ->   A: [M, N]   ->   out: [1, M, 1, L]
-        # But only operate on frustums that actually contain at least one point to avoid NaN values.
-        # No residual connection possible here
+        # Normalize and then encode PC as key and value [1, N, 1, L]
+        k, v = (
+            self.kv_cross_attention(self.norm_cross_attention(pc))
+            .reshape([1, n_points, 1, 2, self.n_channels_projection])
+            .unbind(-2)
+        )
+        # Initialize output tensor with zeros
         feats = pc.new_zeros((self.n_frustums, self.n_channels_projection))
-        # Repeat the single column of the decoder parameter during forward to be able to calculate the gradient
+        # Repeat the first dimension of the decoder so that it can be indexed with the global frustum index (row-major)
+        # [1, P, 1, L] -> [1, M, 1, L]
         # https://discuss.pytorch.org/t/repeat-a-nn-parameter-for-efficient-computation/25659/6
-        decoder: torch.Tensor = self.decoder.repeat(1, self.n_splits_azi, 1, 1)
+        decoder = self.decoder.repeat(1, self.n_splits_azi, 1, 1)
+        # Index-select to keep only the parameters corresponding to non-empty frustums [1, M, 1, L] -> [1, I, 1, L]
         decoder = decoder[:, i_unique, :, :]  # pylint: disable=unsubscriptable-object
+        # Evaluate cross-attention and residual connection
+        # Query: [1, I, 1, L] | Key, Value: [1, N, 1, L] -> Attention Matrix: [I, N] -> Output: [1, I, 1, L]
         out = memory_efficient_attention(query=decoder, key=k, value=v, attn_bias=mask, p=self.dropout)
-        feats[i_unique, :] = self.norm_cross_attention(out + decoder)[0, :, 0, :]
+        # Index-put the output of the cross attention into the output tensor [1, I, 1, L] -> [1, M, 1, L]
+        feats[i_unique, :] = (out + decoder)[0, :, 0, :]  # TODO: Discuss whether this residual connection is sensible
 
-        # Apply feed forward network (2 layers with dropout, non-linearity, residual connection and layer-norm)
+        # Apply feed forward network (norm, fully connected network, residual connection, dropout)
         return self.ffn_cross_attention(feats)
 
 
