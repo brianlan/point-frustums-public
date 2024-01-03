@@ -21,6 +21,9 @@ build-backend = "setuptools.build_meta"
 [tool.pylint.'MESSAGES CONTROL']
     max-line-length = 120
     disable = '''
+        too-many-arguments,
+        too-many-instance-attributes,
+        redefined-builtin,
         missing-module-docstring,
         unused-argument,
         unused-variable,
