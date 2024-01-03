@@ -53,7 +53,7 @@ class Neck(nn.Module, metaclass=ABCMeta):
 
 class Head(nn.Module, metaclass=ABCMeta):
     @abstractmethod
-    def forward(self, features: Tensor | Mapping[str, Tensor]) -> NamedTuple:
+    def forward(self, features: Tensor | Mapping[str, Tensor]) -> Mapping[str, Tensor]:
         pass
 
 
