@@ -99,11 +99,19 @@ class FPN(nn.Module):
 
         self.p6, self.p7 = None, None
         if with_p6:
-            self.p6 = Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2)
+            self.p6 = nn.Sequential(
+                nn.Dropout(self.dropout),
+                Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2),
+                self.norm_layer(self.n_channels_out),
+            )
             self.strides["p6"] = tuple(2 * s for s in self.strides[max(self.layers.keys())])
         if with_p7:
             assert with_p6
-            self.p7 = Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2)
+            self.p7 = nn.Sequential(
+                nn.Dropout(self.dropout),
+                Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2),
+                self.norm_layer(self.n_channels_out),
+            )
             self.strides["p7"] = tuple(2 * s for s in 2 * self.strides["p6"])
 
     def _get_first_block(self, n_channels_in, n_channels, n_channels_out, stride):
@@ -138,6 +146,11 @@ class FPN(nn.Module):
         1. Evaluate entire bottom-up path and the lateral connection and store each output in the results dictionary
         2. Propagate from the highest level down to evaluate the top-down path, at each layer add to the results and
            apply the post-step
+
+        Dropout is applied throughout the network:
+        - Geometric 2d dropout before every block in the bottom-up path (and before the conv layers of p6/p6)
+        - Standard dropout is applied in the beginning of the lateral connection
+        - Geometric 2d dropout before the post layer
         :return:
         """
         n_channels_in = self.n_channels_in
@@ -151,13 +164,17 @@ class FPN(nn.Module):
             n_channels_out = layer.n_channels * self.block.expansion
             self.strides[name] = stride
             # Step 1: The first block of each layer is a special case as it optionally performs the downsampling
-            layers = [self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, stride_layer)]
+            layers = [
+                nn.Dropout2d(self.dropout),
+                self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, stride_layer),
+            ]
             # Step 2: Add the remaining blocks (no stride/downsampling)
             for _ in range(layer.n_blocks):
+                layers.append(nn.Dropout2d(self.dropout))
                 layers.append(self.block(n_channels_out, layer.n_channels, norm_layer=self.norm_layer))
             up[name] = nn.Sequential(*layers)
             # Step 3: Build the lateral connection (Conv2D) and the top-down-path upsampling layer (interpolate)
-            lateral[name] = conv1x1(n_channels_out, self.n_channels_out)
+            lateral[name] = nn.Sequential(nn.Dropout(self.dropout), conv1x1(n_channels_out, self.n_channels_out))
             n_channels_in = n_channels_out
 
             if previous_layer is not None:
@@ -167,6 +184,7 @@ class FPN(nn.Module):
                     scale_factor=stride_layer, mode=self.upsampling_mode, align_corners=True
                 )
                 post[previous_layer] = nn.Sequential(
+                    nn.Dropout2d(self.dropout),
                     Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3),
                     self.norm_layer(self.n_channels_out),
                 )
