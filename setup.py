@@ -95,6 +95,7 @@ setup(
         "pyquaternion",
         "loguru",
         "prettytable",
+        "PyYaml",
     ],
     extras_require={"dev": ["pytest", "pylint", "pre-commit", "black"], "test": ["pytest"]},
     ext_modules=get_extensions(),

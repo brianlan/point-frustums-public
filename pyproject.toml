@@ -27,9 +27,10 @@ build-backend = "setuptools.build_meta"
         missing-module-docstring,
         unused-argument,
         unused-variable,
-        unused-import,
         missing-function-docstring,
         missing-class-docstring,
         too-few-public-methods,
         fixme,
     '''
+[tool.pylint.MASTER]
+    ignore-paths = [ "point_frustums/ops/rotation_conversions.py" ]

@@ -6,3 +6,5 @@
 
 /point_frustums/*.so
 /point_frustums.egg-info/
+
+/lightning_logs/
