@@ -24,13 +24,13 @@ class Detection3DRuntime(LightningModule, metaclass=ABCMeta):
         return self.model.forward(lidar=lidar, camera=camera, radar=radar)
 
     @abstractmethod
-    def training_step(self, *args, **kwargs):
+    def training_step(self, batch, batch_idx):  # pylint: disable=arguments-differ
         pass
 
     @abstractmethod
-    def validation_step(self, *args, **kwargs):
+    def validation_step(self, batch, batch_idx):  # pylint: disable=arguments-differ
         pass
 
     @abstractmethod
-    def test_step(self, *args, **kwargs):
+    def test_step(self, batch, batch_idx):  # pylint: disable=arguments-differ
         pass

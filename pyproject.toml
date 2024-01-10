@@ -23,6 +23,7 @@ build-backend = "setuptools.build_meta"
     disable = '''
         too-many-arguments,
         too-many-instance-attributes,
+        too-many-locals,
         redefined-builtin,
         missing-module-docstring,
         unused-argument,

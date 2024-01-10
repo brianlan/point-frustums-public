@@ -9,11 +9,12 @@ from point_frustums.utils import geometry
 @dataclass(slots=True, frozen=True)
 class ModelOutputSpecification:
     strides: list[tuple[int, int]]
-    layer_size: list[int]
+    layer_sizes: list[tuple[int, int]]
+    layer_sizes_flat: list[int]
 
     feat_center_grid: torch.Tensor  # Shape: [N, 2]
     feat_receptive_field_sizes: torch.Tensor  # Shape: [N, 2]
-    feat_receptive_fields: torch.Tensor  # Shape: [N, 2]
+    feat_receptive_fields: torch.Tensor  # Shape: [N, 4]
 
     feat_center_pol_azi: torch.Tensor  # Shape: [N, 2]
 
@@ -61,12 +62,20 @@ class ConfigDiscretize:
         return tuple(geometry.deg_to_rad(x) for x in self.fov_pol_deg)
 
     @property
-    def delta_azi(self):
-        return (self.fov_azi[1] - self.fov_azi[0]) / self.n_splits_azi
+    def range_pol(self):
+        return self.fov_pol[1] - self.fov_pol[0]
+
+    @property
+    def range_azi(self):
+        return self.fov_azi[1] - self.fov_azi[0]
 
     @property
     def delta_pol(self):
-        return (self.fov_pol[1] - self.fov_pol[0]) / self.n_splits_pol
+        return self.range_pol / self.n_splits_pol
+
+    @property
+    def delta_azi(self):
+        return self.range_azi / self.n_splits_azi
 
     @property
     def n_splits(self):
