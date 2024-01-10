@@ -2,21 +2,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-import torch
 from point_frustums.utils import geometry
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True, frozen=False)
 class ModelOutputSpecification:
     strides: list[tuple[int, int]]
     layer_sizes: list[tuple[int, int]]
     layer_sizes_flat: list[int]
-
-    feat_center_grid: torch.Tensor  # Shape: [N, 2]
-    feat_receptive_field_sizes: torch.Tensor  # Shape: [N, 2]
-    feat_receptive_fields: torch.Tensor  # Shape: [N, 4]
-
-    feat_center_pol_azi: torch.Tensor  # Shape: [N, 2]
 
 
 @dataclass(frozen=True)

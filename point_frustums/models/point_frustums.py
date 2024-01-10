@@ -178,10 +178,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             strides=list(strides),
             layer_sizes=size_per_layer,
             layer_sizes_flat=size_per_layer_flat,
-            feat_center_grid=self.feat_center_grid,
-            feat_receptive_field_sizes=self.feat_receptive_field_sizes,
-            feat_receptive_fields=self.feat_receptive_fields,
-            feat_center_pol_azi=self.feat_center_pol_azi,
         )
 
     def get_loss(self, predictions: torch.Tensor, targets: Targets):
