@@ -4,7 +4,7 @@
 import sys
 from pytorch_lightning.cli import LightningCLI
 
-from point_frustums.cli.lightning_cli_arg_helpers import DatasetConfig
+from point_frustums.config_dataclasses.dataset import DatasetConfig
 
 
 class CLI(LightningCLI):

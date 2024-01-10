@@ -6,7 +6,7 @@ from torch import Tensor
 from pytorch_lightning import LightningModule
 
 from point_frustums.models.base_models import Detection3DModel
-from point_frustums.cli.lightning_cli_arg_helpers import DatasetConfig
+from point_frustums.config_dataclasses.dataset import DatasetConfig
 
 
 class Detection3DRuntime(LightningModule, metaclass=ABCMeta):

@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from functools import cached_property
 from math import isclose
 from typing import Optional, Literal, Dict
@@ -8,83 +8,13 @@ import torch
 from torch import nn
 from xformers.ops.fmha import attn_bias, memory_efficient_attention
 
-from point_frustums.utils.geometry import deg_to_rad
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigDiscretize:
-    n_splits_azi: int
-    n_splits_pol: int
-    fov_azi_deg: tuple[int, int]
-    fov_pol_deg: tuple[int, int]
-
-    @property
-    def fov_azi(self):
-        return tuple(deg_to_rad(x) for x in self.fov_azi_deg)
-
-    @property
-    def fov_pol(self):
-        return tuple(deg_to_rad(x) for x in self.fov_pol_deg)
-
-    @property
-    def delta_azi(self):
-        return (self.fov_azi[1] - self.fov_azi[0]) / self.n_splits_azi
-
-    @property
-    def delta_pol(self):
-        return (self.fov_pol[1] - self.fov_pol[0]) / self.n_splits_pol
-
-    @property
-    def n_splits(self):
-        return self.n_splits_azi * self.n_splits_pol
-
-
-@dataclass(slots=True, kw_only=True)
-class Function:
-    id: Literal["relative_angle", "distance_to_mean"]
-    channel: Literal["x", "y", "z", "radial", "azimuthal", "polar", "intensity", "timestamp"]
-    std: float
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigDecorate:
-    functions: Sequence[Function]
-    channels_out: Sequence[str]
-
-    @property
-    def n_channels_out(self):
-        return len(self.channels_out)
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigVectorize:
-    layers: Sequence[int]
-
-    @property
-    def n_channels_out(self):
-        if len(self.layers) == 0:
-            return None
-        return self.layers[-1]
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigReduce:
-    layers: Sequence[int]
-
-    @property
-    def n_channels_out(self):
-        if len(self.layers) == 0:
-            return None
-        return self.layers[-1]
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigTransformerFrustumEncoder:
-    n_channels_embedding: int
-    n_channels_projection: int
-    n_heads: int = 1
-    n_encoders: int = 1
-    dropout: float = 0.1
+from point_frustums.config_dataclasses.point_frustums import (
+    ConfigDiscretize,
+    ConfigVectorize,
+    ConfigDecorate,
+    ConfigReduce,
+    ConfigTransformerFrustumEncoder,
+)
 
 
 @torch.jit.script

@@ -1,28 +1,12 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import nn
 from torchvision.models.resnet import Bottleneck, conv1x1
 
 from point_frustums.ops.spherical_coos_convolutions import Conv2dSpherical
-
-
-@dataclass(slots=True, kw_only=True)
-class ConfigFPNLayer:
-    n_blocks: int
-    n_channels: int
-    downsampling_horizontal: bool
-    downsampling_vertical: bool
-
-    @property
-    def stride(self):
-        stride_horizontal, stride_vertical = 1, 1
-        if self.downsampling_horizontal:
-            stride_horizontal = 2
-        if self.downsampling_vertical:
-            stride_vertical = 2
-        return stride_horizontal, stride_vertical
+from point_frustums.config_dataclasses.fpn import ConfigFPNLayer, ConfigFPNExtraLayer
 
 
 class BottleneckRangeImage(Bottleneck):
@@ -82,8 +66,7 @@ class FPN(nn.Module):
         n_channels_in: int,
         n_channels_out: int,
         layers: Mapping[str, ConfigFPNLayer],
-        with_p6: bool = False,
-        with_p7: bool = False,
+        extra_layers: Optional[dict[str, ConfigFPNExtraLayer]] = None,
         dropout: float = 0.0,
         upsampling_mode: str = "bilinear",
     ):
@@ -93,26 +76,13 @@ class FPN(nn.Module):
         self.dropout = dropout
         self.upsampling_mode = upsampling_mode
         self.layers = dict(sorted(layers.items()))
+        layers_keys = list(layers.keys())
+        self.first_layer, self.last_layer = layers_keys[0], layers_keys[-1]
+        self.extra_layers = dict(sorted(extra_layers.items())) if extra_layers is not None else {}
 
         self.strides = {}
         self.up, self.lateral, self.down, self.post = self.build_layers()
-
-        self.p6, self.p7 = None, None
-        if with_p6:
-            self.p6 = nn.Sequential(
-                nn.Dropout(self.dropout),
-                Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2),
-                self.norm_layer(self.n_channels_out),
-            )
-            self.strides["p6"] = tuple(2 * s for s in self.strides[max(self.layers.keys())])
-        if with_p7:
-            assert with_p6
-            self.p7 = nn.Sequential(
-                nn.Dropout(self.dropout),
-                Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, stride=2),
-                self.norm_layer(self.n_channels_out),
-            )
-            self.strides["p7"] = tuple(2 * s for s in 2 * self.strides["p6"])
+        self.extra, self.extra_lateral = self.build_extra_layers()
 
     def _get_first_block(self, n_channels_in, n_channels, n_channels_out, stride):
         """
@@ -135,7 +105,7 @@ class FPN(nn.Module):
         )
         return block
 
-    def build_layers(self) -> tuple[torch.ModuleDict, torch.ModuleDict, torch.ModuleDict, torch.ModuleDict]:
+    def build_layers(self) -> tuple[nn.ModuleDict, nn.ModuleDict, nn.ModuleDict, nn.ModuleDict]:
         """Build the layers of the FPN.
         A FPN layer consists of several components:
             1. The top-down path is made up of a series of blocks (the first sets the size and dimension for the layer)
@@ -148,25 +118,25 @@ class FPN(nn.Module):
            apply the post-step
 
         Dropout is applied throughout the network:
-        - Geometric 2d dropout before every block in the bottom-up path (and before the conv layers of p6/p6)
+        - Geometric 2d dropout before every block in the bottom-up path (and before the conv of extra layers)
         - Standard dropout is applied in the beginning of the lateral connection
         - Geometric 2d dropout before the post layer
         :return:
         """
         n_channels_in = self.n_channels_in
-        stride = (1, 1)
 
         up, lateral, down, post = {}, {}, {}, {}
-        previous_layer = None
+        prev = None
         for name, layer in self.layers.items():
-            stride_layer = layer.stride
-            stride = tuple(s_l * s for s_l, s in zip(stride_layer, stride))
+            self.strides[name] = (
+                layer.stride[0] * self.strides.get(prev, (1, 1))[0],
+                layer.stride[1] * self.strides.get(prev, (1, 1))[1],
+            )
             n_channels_out = layer.n_channels * self.block.expansion
-            self.strides[name] = stride
             # Step 1: The first block of each layer is a special case as it optionally performs the downsampling
             layers = [
                 nn.Dropout2d(self.dropout),
-                self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, stride_layer),
+                self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, layer.stride),
             ]
             # Step 2: Add the remaining blocks (no stride/downsampling)
             for _ in range(layer.n_blocks):
@@ -177,20 +147,35 @@ class FPN(nn.Module):
             lateral[name] = nn.Sequential(nn.Dropout(self.dropout), conv1x1(n_channels_out, self.n_channels_out))
             n_channels_in = n_channels_out
 
-            if previous_layer is not None:
+            if prev is not None:
                 # Delay initialization of the bottom-up pathway by one layer as it is dependent on the specification of
                 # the consecutive layer
-                down[previous_layer] = nn.Upsample(
-                    scale_factor=stride_layer, mode=self.upsampling_mode, align_corners=True
-                )
-                post[previous_layer] = nn.Sequential(
+                down[prev] = nn.Upsample(scale_factor=layer.stride, mode=self.upsampling_mode, align_corners=True)
+                post[prev] = nn.Sequential(
                     nn.Dropout2d(self.dropout),
                     Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3),
                     self.norm_layer(self.n_channels_out),
                 )
-            previous_layer = name
+            prev = name
 
         return nn.ModuleDict(up), nn.ModuleDict(lateral), nn.ModuleDict(down), nn.ModuleDict(post)
+
+    def build_extra_layers(self) -> tuple[nn.ModuleDict, nn.ModuleDict]:
+        prev = list(self.strides.keys())[-1]
+        extra_layers = {}
+        extra_layers_lateral = {}
+        n_channels_in = self.layers[self.last_layer].n_channels * self.block.expansion
+        for name, layer in self.extra_layers.items():
+            self.strides[name] = (layer.stride[0] * self.strides[prev][0], layer.stride[1] * self.strides[prev][1])
+            extra_layers[name] = nn.Sequential(
+                nn.Dropout(self.dropout),
+                Conv2dSpherical(n_channels_in, n_channels_in, kernel_size=3, stride=layer.stride),
+                self.norm_layer(n_channels_in),
+            )
+            extra_layers_lateral[name] = nn.Sequential(
+                nn.Dropout(self.dropout), conv1x1(n_channels_in, self.n_channels_out)
+            )
+        return nn.ModuleDict(extra_layers), nn.ModuleDict(extra_layers_lateral)
 
     def forward(self, input: torch.Tensor) -> dict[str, torch.Tensor]:
         """Forward pass of the FPN"""
@@ -200,6 +185,11 @@ class FPN(nn.Module):
         for layer in self.layers.keys():
             input = self.up[layer](input)
             results[layer] = self.lateral[layer](input)
+
+        # Evaluate extra layers, building on the result of the last bottom-up layer
+        for layer in self.extra_layers.keys():
+            input = self.extra[layer](input)
+            results[layer] = self.extra_lateral[layer](input)
 
         # Walk through the top-down path, add the up-sampled featuremaps to the intermediate result, apply the FC layer
         input = None
@@ -211,10 +201,5 @@ class FPN(nn.Module):
             results[layer] += self.down[layer](input)
             input = results[layer]
             results[layer] = self.post[layer](results[layer])
-
-        if self.p6 is not None:
-            results["p6"] = self.p6(results[max(self.layers.keys())])
-        if self.p7 is not None:
-            results["p7"] = self.p6(results["p6"])
 
         return results
