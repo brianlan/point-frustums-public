@@ -1,13 +1,17 @@
-from typing import Optional
+from typing import Literal, Optional
 from math import prod, exp, isclose
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
 
 from point_frustums.config_dataclasses.dataset import DatasetConfig
-from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification, TargetAssignment
+from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification, TargetAssignment, Losses
 from point_frustums.utils.geometry import (
+    sph_to_cart_torch,
+    cart_to_sph_torch,
+    get_corners_3d,
     get_spherical_projection_boundaries,
     rotate_2d,
     rotation_matrix_from_spherical,
@@ -21,6 +25,7 @@ from .base_models import Detection3DModel
 from .base_runtime import Detection3DRuntime
 from .heads import PointFrustumsHead
 from .necks import PointFrustumsNeck
+from .training.losses import vfl
 from .training.target_assignment import match_target_projection_to_receptive_field, sinkhorn
 
 
@@ -39,11 +44,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         model: PointFrustumsModel,
         dataset: DatasetConfig,
         target_assignment: TargetAssignment,
-        # losses: LossesConfig,
+        losses: Losses,
         **kwargs,
     ):
         super().__init__(*args, model=model, dataset=dataset, **kwargs)
         self.target_assignment = target_assignment
+        self.losses = losses
         # TODO: Add postprocessing step
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
@@ -207,38 +213,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     @property
     def feature_vectors_angular_centers(self):
         return self.get_buffer("feat_center_pol_azi")
-    
-    def get_loss(self, predictions: torch.Tensor, targets: Targets):
-        # TODO: Match predictions to targets (OTA)
-        #   - Requires:
-        #       - Predictions
-        #       - Targets
-        #       - Targets projections
-        #       - Featuremap Geometry Specifications
-        # TODO: Evaluate foreground index
-
-        # TODO: Classification Loss (Focal Loss)
-        # TODO: Attribute Loss (Focal Loss)
-        # TODO: Vario-Focal Loss (applied to class-wise IoU Prediction)
-        #   - detach box center/wlh/orientation prediction
-
-        # TODO: Subset predictions and broadcast targets (to foreground indices)
-
-        # TODO: 3D Center Loss (Smooth L1 Loss; evaluate only if targets)
-        #   - Applied separately to radius and angular components
-        #   - Operate on featuremap position invariant targets
-        #   - Scale angular component with discretization
-        #   - Requires:
-        #       -> Angular center of feature vectors (depend on: discretization + strides)
-        #       -> Foreground
-        # TODO: WLH Loss (Smooth L1 Loss; evaluate only if targets)
-        # TODO: Orientation Loss (Smooth L1 Loss applied to 6D encoding of orientation matrix; evaluate only if targets)
-        #   - Make targets azimuth invariant (rotate by azimuthal position mathematically negative)
-        # TODO: Velocity Loss (Smooth L1 Loss; evaluate only if targets)
-        #   - Requires EGO Velocity
-        #   - Make target velocity azimuth-invariant
-
-        pass
 
     @staticmethod
     def _one_hot(label: torch.Tensor, num_classes: int, index: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -249,7 +223,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             one_hot = one_hot[index, ...]
         return one_hot.float()
 
-    def _encode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _encode_center(self, x: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Encode the M spherical center coordinates w.r.t. the angular position of the feature vectors.
         :param x:
@@ -292,7 +266,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             x = x[..., idx_feat, :]
         return x.exp()
 
-    def _encode_orientation(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _encode_orientation(self, x: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Encode the provided M orientation matrices w.r.t. the angular coordinates on the featuremap and subsequently in
         form of the 6D encoding suggested in: http://arxiv.org/abs/1812.07035
@@ -327,7 +301,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return torch.einsum("...ij,...jk->...ik", rotation_matrices, x)
 
     def _encode_velocity(
-        self, x: torch.tensor, ego_velocity: torch.Tensor, idx_feat: Optional[torch.Tensor] = None
+        self, x: torch.tensor, ego_velocity: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Encode the velocity as [normal, tangential] velocity by rotating it by the negative of the azimuthal position.
@@ -485,8 +459,230 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return match_index
 
+    @staticmethod
+    def _broadcast_targets(targets: list[torch.Tensor], indices: list[torch.tensor]) -> torch.Tensor:
+        return torch.cat([t[i, ...] for i, t in zip(indices, targets)], dim=0)
+
+    def _loss_center(
+        self,
+        predictions_center_fg: torch.Tensor,
+        foreground_idx: torch.Tensor,
+        targets_center: list[torch.Tensor],
+        targets_indices_fg: list[torch.Tensor],
+    ) -> dict[Literal["center_radial", "center_angular"], torch.Tensor]:
+        # Evaluate the loss imposed on the center coordinate
+        targets_center_fg = cart_to_sph_torch(self._broadcast_targets(targets_center, targets_indices_fg))
+        targets_center_fg = self._encode_center(targets_center_fg, idx_feat=foreground_idx)
+        center_radial = F.smooth_l1_loss(
+            input=predictions_center_fg[..., 0],
+            target=targets_center_fg[..., 0],
+            reduction="sum",
+            **self.losses.center_radial.kwargs,
+        )
+        center_angular = F.smooth_l1_loss(
+            input=predictions_center_fg[..., [1, 2]],
+            target=targets_center_fg[..., [1, 2]],
+            reduction="sum",
+            **self.losses.center_angular.kwargs,
+        )
+        return {"center_radial": center_radial, "center_angular": center_angular}
+
+    def _loss_wlh(
+        self,
+        predictions_wlh_fg: torch.Tensor,
+        targets_wlh: list[torch.Tensor],
+        targets_indices_fg: list[torch.Tensor],
+    ) -> dict[Literal["wlh"], torch.Tensor]:
+        targets_wlh_fg = self._encode_wlh(self._broadcast_targets(targets_wlh, targets_indices_fg))
+        wlh = F.smooth_l1_loss(
+            predictions_wlh_fg,
+            targets_wlh_fg,
+            reduction="sum",
+            **self.losses.wlh.kwargs,
+        )
+        return {"wlh": wlh}
+
+    def _loss_orientation(
+        self,
+        predictions_orientation_fg: torch.Tensor,
+        foreground_idx: torch.Tensor,
+        targets_orientation: list[torch.Tensor],
+        targets_indices_fg: list[torch.Tensor],
+    ) -> dict[Literal["orientation"], torch.Tensor]:
+        targets_orientation_fg = self._broadcast_targets(targets_orientation, targets_indices_fg)
+        targets_orientation_fg = self._encode_orientation(targets_orientation_fg, idx_feat=foreground_idx)
+        orientation = nn.functional.smooth_l1_loss(
+            predictions_orientation_fg,
+            targets_orientation_fg,
+            reduction="sum",
+            **self.losses.orientation.kwargs,
+        )
+        return {"orientation": orientation}
+
+    def _loss_velocity(
+        self,
+        predictions_velocity_fg: torch.Tensor,
+        ego_velocities: list[torch.Tensor],
+        foreground_idx: torch.Tensor,
+        targets_velocity: list[torch.Tensor],
+        targets_indices_fg: list[torch.Tensor],
+    ) -> dict[Literal["velocity"], torch.Tensor]:
+        targets_velocity_fg = self._broadcast_targets(targets_velocity, targets_indices_fg)
+
+        # Broadcast the ego velocities to match the foreground vector
+        ego_velocities = [v[None, :].repeat(len(i), 1) for i, v in zip(targets_indices_fg, ego_velocities)]
+        ego_velocities = torch.cat(ego_velocities, dim=0)
+
+        targets_velocity_fg = self._encode_velocity(targets_velocity_fg, ego_velocities, idx_feat=foreground_idx)
+
+        # Make sure that NaN velocity values which may be introduced by the dataloader are filtered out
+        data_nan = torch.isnan(targets_velocity_fg)
+        targets_velocity_fg = targets_velocity_fg[~data_nan]
+        predictions_velocity_fg = predictions_velocity_fg[~data_nan]
+
+        velocity = nn.functional.smooth_l1_loss(
+            predictions_velocity_fg,
+            targets_velocity_fg,
+            reduction="sum",
+            **self.losses.velocity.kwargs,
+        )
+
+        return {"velocity": velocity}
+
+    def get_losses(
+        self,
+        predictions: dict[
+            Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "iou"], dict[str, torch.Tensor]
+        ],
+        targets: list[Targets],
+        ego_velocities: list[torch.Tensor],
+    ) -> dict[
+        Literal["class", "attribute", "iou", "center_radial", "center_angular", "wlh", "orientation", "velocity"],
+        torch.Tensor,
+    ]:
+        # Flatten the last 2 dimensions of all predictions featuremaps, swap dimensions  and concatenate
+        predictions = {
+            head: torch.cat([layer.flatten(start_dim=2).transpose(-2, -1) for layer in layers.values()], dim=-2)
+            for head, layers in predictions.items()
+        }
+        feat_center_decoded = sph_to_cart_torch(self._decode_center(predictions["center"]))
+        feat_wlh_decoded = self._decode_wlh(predictions["wlh"])
+        feat_orientation_decoded = self._decode_orientation(predictions["orientation"])
+
+        feat_corners = get_corners_3d(
+            centers=feat_center_decoded,
+            wlh=feat_wlh_decoded,
+            orientation=feat_orientation_decoded,
+        )
+
+        targets_indices = []
+        indices = []
+        foreground = []
+        targets_label = []
+        targets_attribute = []
+        targets_iou = []
+        for i in range(predictions["class"].shape[0]):
+            # Assign the index of a target/the background to each prediction
+            with torch.no_grad():
+                target_labels = self._one_hot(targets[i].label, self.dataset.annotations.n_classes)
+                target_corners = get_corners_3d(targets[i].center, targets[i].wlh, targets[i].orientation)
+                index = self.assign_target_index_to_features(
+                    targets=targets[i],
+                    target_labels=target_labels,
+                    target_corners=target_corners,
+                    feat_labels=predictions["class"][i, ...],
+                    feat_centers=feat_center_decoded[i, ...],
+                    feat_corners=feat_corners[i, ...],
+                )
+            indices.append(index)
+            fg = torch.ge(index, 0)
+            foreground.append(fg)
+            target_indices = index[fg]
+            targets_indices.append(target_indices)
+
+            targets_label.append(target_labels[index, :])
+            targets_attribute.append(self._one_hot(targets[i].attribute, self.dataset.annotations.n_attributes, index))
+            iou = torch.zeros_like(index, dtype=torch.float).index_put_(
+                (fg,),
+                iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0],
+            )
+            targets_iou.append(targets_label[-1] * iou[:, None])
+
+        foreground = torch.stack(foreground, dim=0)
+        foreground_idx = foreground.nonzero().unbind(-1)[1]
+        targets_label = torch.stack(targets_label, dim=0)
+        targets_attribute = torch.stack(targets_attribute, dim=0)
+        targets_iou = torch.stack(targets_iou, dim=0).detach()
+
+        # Evaluate the losses that are applied to the entire featuremap (class/attribute/IoU)
+        losses = {
+            "class": sigmoid_focal_loss(predictions["class"], targets_label, reduction="sum"),
+            "attribute": sigmoid_focal_loss(predictions["attribute"], targets_attribute, reduction="sum"),
+            "vfl": vfl(predictions["iou"], targets_iou, reduction="sum", **self.losses.vfl.kwargs),
+        }
+
+        # Evaluate the losses that are applied only to the foreground (center/wlh/orientation/velocity)
+        if len(foreground_idx) != 0:
+            # Evaluate the loss imposed on the center coordinate
+            losses.update(
+                self._loss_center(
+                    predictions_center_fg=predictions["center"][foreground],
+                    foreground_idx=foreground_idx,
+                    targets_center=[t.center for t in targets],
+                    targets_indices_fg=targets_indices,
+                )
+            )
+            # Evaluate the loss imposed on the size
+            losses.update(
+                self._loss_wlh(
+                    predictions_wlh_fg=predictions["wlh"][foreground],
+                    targets_wlh=[t.wlh for t in targets],
+                    targets_indices_fg=targets_indices,
+                )
+            )
+            # Evaluate the loss imposed on the orientation
+            losses.update(
+                self._loss_orientation(
+                    predictions_orientation_fg=predictions["orientation"][foreground],
+                    foreground_idx=foreground_idx,
+                    targets_orientation=[t.orientation for t in targets],
+                    targets_indices_fg=targets_indices,
+                )
+            )
+            # Evaluate the loss imposed on the velocity
+            losses.update(
+                self._loss_velocity(
+                    predictions_velocity_fg=predictions["velocity"][foreground],
+                    ego_velocities=ego_velocities,
+                    foreground_idx=foreground_idx,
+                    targets_velocity=[t.velocity for t in targets],
+                    targets_indices_fg=targets_indices,
+                )
+            )
+
+        n = max(1, len(foreground_idx))
+        losses = {loss: value / n for loss, value in losses.items()}
+        return losses  # NOQA: Expected type 'dict[Literal[...], torch.Tensor]', got 'dict[str, torch.Tensor]' instead
+
+    def sum_losses(self, losses: dict[str, torch.Tensor]) -> torch.Tensor:
+        loss = []
+        for key, val in losses.items():
+            if key == "class":
+                key = "label"
+            loss_config = getattr(self.losses, key)
+            if loss_config.active:
+                loss.append(loss_config.weight * val)
+        return torch.stack(loss, dim=0).sum(dim=0)
+
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
+        ego_velocities = [torch.from_numpy(sample["velocity"]).to(self.device) for sample in batch["metadata"]]
+        losses = self.get_losses(predictions=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
+        loss = self.sum_losses(losses)
+        for key, value in losses.items():
+            self.log(f"Loss/{key}/train", value)
+        self.log("Loss/train", loss)
+        return loss
 
     def validation_step(self, batch, batch_idx):
         pass
