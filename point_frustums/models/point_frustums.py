@@ -127,59 +127,74 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         layers_rfs = list(zip(layers_rfs_pol.values(), layers_rfs_azi.values()))
         reference_boxes_centered = 0.5 * torch.tensor(layers_rfs).repeat(1, 2) * torch.tensor([-1, -1, 1, 1])
 
-        discrete = self.model.backbone.lidar.discretize
+        discretize = self.model.backbone.lidar.discretize
         strides = self.model.neck.fpn.strides.values()
 
         size_per_layer = []
         size_per_layer_flat = []
-        feat_center_grid = []
+        feat_rfs_center = []
         for layer, stride in self.model.neck.fpn.strides.items():
-            assert isclose(discrete.n_splits_pol % stride[0], 0), (
-                f"The polar input featuremap resolution {discrete.n_splits_pol} is not divisible by the stride "
+            assert isclose(discretize.n_splits_pol % stride[0], 0), (
+                f"The polar input featuremap resolution {discretize.n_splits_pol} is not divisible by the stride "
                 f"{stride[0]} on layer {layer}."
             )
-            assert isclose(discrete.n_splits_azi % stride[1], 0), (
-                f"The azimuthal input featuremap resolution {discrete.n_splits_azi} is not divisible by the "
+            assert isclose(discretize.n_splits_azi % stride[1], 0), (
+                f"The azimuthal input featuremap resolution {discretize.n_splits_azi} is not divisible by the "
                 f"stride {stride[1]} on layer {layer}."
             )
-            size_per_layer.append((int(discrete.n_splits_pol / stride[0]), int(discrete.n_splits_azi / stride[1])))
-            size_per_layer_flat.append(int(discrete.n_splits / prod(stride)))
+            size_per_layer.append((int(discretize.n_splits_pol / stride[0]), int(discretize.n_splits_azi / stride[1])))
+            size_per_layer_flat.append(int(discretize.n_splits / prod(stride)))
 
             # Get the node position w.r.t. the original input data shape
-            nodes_pol = torch.arange(0, discrete.n_splits_pol - 1e-8, step=stride[0])
-            nodes_azi = torch.arange(0, discrete.n_splits_azi - 1e-8, step=stride[1])
+            nodes_pol = torch.arange(0, discretize.n_splits_pol - 1e-8, step=stride[0])
+            nodes_azi = torch.arange(0, discretize.n_splits_azi - 1e-8, step=stride[1])
 
             # Create meshgrid representation for easy indexing
             nodes_pol, nodes_azi = torch.meshgrid(nodes_pol, nodes_azi, indexing="xy")
             nodes_pol, nodes_azi = nodes_pol.flatten(), nodes_azi.flatten()
             # Merge to obtain the [x, y] coordinates of the centers
-            feat_center_grid.append(torch.stack((nodes_azi, nodes_pol), dim=1))
+            feat_rfs_center.append(torch.stack((nodes_azi, nodes_pol), dim=1))
             # size_per_layer.append(feat_center_grid[-1].shape[0])
-        feat_center_grid = torch.cat(feat_center_grid, dim=0)
-        self.register_buffer("feat_center_grid", feat_center_grid)
+        feat_rfs_center = torch.cat(feat_rfs_center, dim=0)
+        self.register_buffer("feat_rfs_centers", feat_rfs_center)
 
-        feat_receptive_fields = reference_boxes_centered.repeat_interleave(torch.tensor(size_per_layer_flat), dim=0)
-        feat_receptive_fields += feat_center_grid.repeat(1, 2)
-        self.register_buffer("feat_receptive_fields", feat_receptive_fields)
+        feat_rfs = reference_boxes_centered.repeat_interleave(torch.tensor(size_per_layer_flat), dim=0)
+        feat_rfs += feat_rfs_center.repeat(1, 2)
+        self.register_buffer("feat_rfs", feat_rfs)
 
-        feat_receptive_field_sizes = torch.tensor(layers_rfs).repeat_interleave(
-            torch.tensor(size_per_layer_flat), dim=0
-        )
-        self.register_buffer("feat_receptive_field_sizes", feat_receptive_field_sizes)
+        feat_rfs_sizes = torch.tensor(layers_rfs).repeat_interleave(torch.tensor(size_per_layer_flat), dim=0)
+        self.register_buffer("feat_rfs_sizes", feat_rfs_sizes)
 
         # Scale-scale-shift grid centers to angular center coordinates
-        feat_center_pol_azi = feat_center_grid.clone()
-        feat_center_pol_azi.div_(torch.tensor([discrete.n_splits_pol, discrete.n_splits_azi]))
-        feat_center_pol_azi.mul_(torch.tensor([discrete.range_pol, discrete.range_azi]))
-        feat_center_pol_azi.add_(torch.tensor([discrete.fov_pol[0], discrete.fov_azi[0]]))
+        feat_center_pol_azi = feat_rfs_center[:, [1, 0]]
+        feat_center_pol_azi.div_(torch.tensor([discretize.n_splits_pol, discretize.n_splits_azi]))
+        feat_center_pol_azi.mul_(torch.tensor([discretize.range_pol, discretize.range_azi]))
+        feat_center_pol_azi.add_(torch.tensor([discretize.fov_pol[0], discretize.fov_azi[0]]))
         self.register_buffer("feat_center_pol_azi", feat_center_pol_azi)
 
         return ModelOutputSpecification(
             strides=list(strides),
             layer_sizes=size_per_layer,
             layer_sizes_flat=size_per_layer_flat,
+            total_size=sum(size_per_layer_flat),
         )
+    
+    @property
+    def receptive_fields(self):
+        return self.get_buffer("feat_rfs")
 
+    @property
+    def receptive_fields_sizes(self):
+        return self.get_buffer("feat_rfs_sizes")
+
+    @property
+    def receptive_fields_centers(self):
+        return self.get_buffer("feat_rfs_centers")
+
+    @property
+    def feature_vectors_angular_centers(self):
+        return self.get_buffer("feat_center_pol_azi")
+    
     def get_loss(self, predictions: torch.Tensor, targets: Targets):
         # TODO: Match predictions to targets (OTA)
         #   - Requires:
