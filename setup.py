@@ -97,7 +97,7 @@ setup(
         "prettytable",
         "PyYaml",
     ],
-    extras_require={"dev": ["pytest", "pylint", "pre-commit", "black"], "test": ["pytest"]},
+    extras_require={"dev": ["pytest", "pylint", "pre-commit", "black", "pycln"], "test": ["pytest"]},
     ext_modules=get_extensions(),
     include_dirs=[np.get_include()],
     cmdclass={"build_ext": torch.utils.cpp_extension.BuildExtension},
