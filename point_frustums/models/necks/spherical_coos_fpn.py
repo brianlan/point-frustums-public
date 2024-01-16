@@ -82,7 +82,7 @@ class FPN(nn.Module):
 
         self.strides = {}
         self.up, self.lateral, self.down, self.post = self.build_layers()
-        self.extra, self.extra_lateral = self.build_extra_layers()
+        self.extra, self.extra_post = self.build_extra_layers()
 
     def _get_first_block(self, n_channels_in, n_channels, n_channels_out, stride):
         """
@@ -163,7 +163,7 @@ class FPN(nn.Module):
     def build_extra_layers(self) -> tuple[nn.ModuleDict, nn.ModuleDict]:
         prev = list(self.strides.keys())[-1]
         extra_layers = {}
-        extra_layers_lateral = {}
+        extra_layers_post = {}
         n_channels_in = self.layers[self.last_layer].n_channels * self.block.expansion
         for name, layer in self.extra_layers.items():
             self.strides[name] = (layer.stride[0] * self.strides[prev][0], layer.stride[1] * self.strides[prev][1])
@@ -172,10 +172,13 @@ class FPN(nn.Module):
                 Conv2dSpherical(n_channels_in, n_channels_in, kernel_size=3, stride=layer.stride),
                 self.norm_layer(n_channels_in),
             )
-            extra_layers_lateral[name] = nn.Sequential(
-                nn.Dropout(self.dropout), conv1x1(n_channels_in, self.n_channels_out)
+            extra_layers_post[name] = nn.Sequential(
+                nn.Dropout2d(self.dropout),
+                Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3),
+                self.norm_layer(self.n_channels_out),
             )
-        return nn.ModuleDict(extra_layers), nn.ModuleDict(extra_layers_lateral)
+            prev = name
+        return nn.ModuleDict(extra_layers), nn.ModuleDict(extra_layers_post)
 
     def forward(self, input: torch.Tensor) -> dict[str, torch.Tensor]:
         """Forward pass of the FPN"""
@@ -189,7 +192,7 @@ class FPN(nn.Module):
         # Evaluate extra layers, building on the result of the last bottom-up layer
         for layer in self.extra_layers.keys():
             input = self.extra[layer](input)
-            results[layer] = self.extra_lateral[layer](input)
+            results[layer] = self.extra_post[layer](input)
 
         # Walk through the top-down path, add the up-sampled featuremaps to the intermediate result, apply the FC layer
         input = None
