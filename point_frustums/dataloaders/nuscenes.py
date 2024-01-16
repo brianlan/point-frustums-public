@@ -595,7 +595,6 @@ class NuScenesDataModule(LightningDataModule):
         data_root: Optional[str] = None,
         batch_size: int = 1,
         num_workers: int = 0,
-        drop_last: bool = False,
         pin_memory: bool = False,
         persistent_workers: bool = False,
         **dataloader_kwargs,
@@ -606,7 +605,6 @@ class NuScenesDataModule(LightningDataModule):
         self.predict_split = predict_split
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.drop_last = drop_last
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
         self.dataloader_kwargs = dataloader_kwargs
@@ -631,8 +629,9 @@ class NuScenesDataModule(LightningDataModule):
             collate_fn=collate_fn,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
             shuffle=True,
-            drop_last=self.drop_last,
+            drop_last=True,
             pin_memory=self.pin_memory,
             **self.dataloader_kwargs,
         )
@@ -652,6 +651,7 @@ class NuScenesDataModule(LightningDataModule):
             collate_fn=collate_fn,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
             shuffle=False,
             drop_last=False,
             pin_memory=self.pin_memory,
@@ -677,6 +677,7 @@ class NuScenesDataModule(LightningDataModule):
             collate_fn=collate_fn,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
             shuffle=False,
             drop_last=False,
             pin_memory=self.pin_memory,
@@ -698,6 +699,7 @@ class NuScenesDataModule(LightningDataModule):
             collate_fn=collate_fn,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
             shuffle=False,
             drop_last=False,
             pin_memory=self.pin_memory,

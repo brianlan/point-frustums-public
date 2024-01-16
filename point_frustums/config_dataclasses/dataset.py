@@ -32,9 +32,17 @@ class Annotations:
         return Labels(self.class_aliases)
 
     @cached_property
+    def n_classes(self) -> int:
+        return len(self.classes.labels)
+
+    @cached_property
     def attributes(self) -> Labels:
         _attributes = list(set(chain.from_iterable(self.category_to_attributes.values())))
         return Labels(_attributes)
+
+    @cached_property
+    def n_attributes(self) -> int:
+        return len(self.attributes.labels)
 
     @cached_property
     def class_to_alias(self) -> dict[str, str]:
