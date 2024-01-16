@@ -1,9 +1,18 @@
+from typing import Optional
 from math import prod, exp, isclose
 
 import torch
+from torch.nn import functional as F
+from torchvision.ops import sigmoid_focal_loss
 
 from point_frustums.config_dataclasses.dataset import DatasetConfig
 from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification
+from point_frustums.utils.geometry import (
+    rotate_2d,
+    rotation_matrix_from_spherical,
+    rotation_6d_to_matrix,
+    matrix_to_rotation_6d,
+)
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
 from .base_models import Detection3DModel
@@ -178,7 +187,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             layer_sizes_flat=size_per_layer_flat,
             total_size=sum(size_per_layer_flat),
         )
-    
+
     @property
     def receptive_fields(self):
         return self.get_buffer("feat_rfs")
@@ -226,6 +235,128 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         #   - Make target velocity azimuth-invariant
 
         pass
+
+    @staticmethod
+    def _one_hot(label: torch.Tensor, num_classes: int, index: Optional[torch.Tensor] = None) -> torch.Tensor:
+        assert label.dim() == 1
+        one_hot = F.one_hot(label.clip(min=0), num_classes=num_classes)  # pylint: disable=not-callable
+        one_hot = torch.where(torch.ge(label[:, None], 0), one_hot, 0)
+        if index is not None:
+            one_hot = one_hot[index, ...]
+        return one_hot.float()
+
+    def _encode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Encode the M spherical center coordinates w.r.t. the angular position of the feature vectors.
+        :param x:
+        :param idx_feat:
+        :return:
+        """
+        center_pol_azi = self.feat_center_pol_azi
+        if idx_feat is not None:
+            center_pol_azi = center_pol_azi[idx_feat, :]
+        x = x.clone()
+        x[..., [1, 2]] -= center_pol_azi
+        x[..., 1] /= self.model.backbone.lidar.discretize.delta_pol
+        x[..., 2] /= self.model.backbone.lidar.discretize.delta_azi
+        return x
+
+    def _decode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Decode the M spherical center coordinates w.r.t. the angular position of the feature vectors.
+        :param x:
+        :param idx_feat:
+        :return:
+        """
+        center_pol_azi = self.feat_center_pol_azi
+        if idx_feat is not None:
+            x = x[..., idx_feat, :]
+            center_pol_azi = center_pol_azi[idx_feat, :]
+        x = x.clone()
+        x[..., 1] *= self.model.backbone.lidar.discretize.delta_pol
+        x[..., 2] *= self.model.backbone.lidar.discretize.delta_azi
+        x[..., [1, 2]] += center_pol_azi
+        return x
+
+    @staticmethod
+    def _encode_wlh(x: torch.Tensor) -> torch.Tensor:
+        return x.log()
+
+    @staticmethod
+    def _decode_wlh(x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if idx_feat is not None:
+            x = x[..., idx_feat, :]
+        return x.exp()
+
+    def _encode_orientation(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Encode the provided M orientation matrices w.r.t. the angular coordinates on the featuremap and subsequently in
+        form of the 6D encoding suggested in: http://arxiv.org/abs/1812.07035
+        :param x: The orientation matrices [M, 3, 3]
+        :param idx_feat: The indices of the feature vectors corresponding to the provided orientations [M]
+        :return:
+        """
+        theta, phi = self.feature_vectors_angular_centers.unbind(dim=-1)
+        if idx_feat is not None:
+            theta = theta[idx_feat]
+            phi = phi[idx_feat]
+        # Transpose along the last 2 dimensions to invert the direction of rotation
+        rotation_matrices = rotation_matrix_from_spherical(theta, phi).transpose(-1, -2)
+        x = torch.einsum("...ij,...jk->...ik", rotation_matrices, x)
+        return matrix_to_rotation_6d(x)
+
+    def _decode_orientation(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Decode the provided M vectors encoded in form of the 6D encoding (http://arxiv.org/abs/1812.07035) to the
+        matrix form and then rotate them back according to the angular coordinates on the featuremap.
+        :param x: The encoded representation of the orientation [M, 6]
+        :param idx_feat: The indices of the feature vectors corresponding to the provided orientations [M]
+        :return:
+        """
+        theta, phi = self.feature_vectors_angular_centers.unbind(dim=-1)
+        if idx_feat is not None:
+            x = x[..., idx_feat, :]
+            theta = theta[idx_feat]
+            phi = phi[idx_feat]
+        x = rotation_6d_to_matrix(x)
+        rotation_matrices = rotation_matrix_from_spherical(theta, phi)
+        return torch.einsum("...ij,...jk->...ik", rotation_matrices, x)
+
+    def _encode_velocity(
+        self, x: torch.tensor, ego_velocity: torch.Tensor, idx_feat: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Encode the velocity as [normal, tangential] velocity by rotating it by the negative of the azimuthal position.
+        :param x:
+        :param ego_velocity:
+        :param idx_feat:
+        :return:
+        """
+        x = x - ego_velocity
+        phi = self.feature_vectors_angular_centers[:, 1]
+        if idx_feat is not None:
+            phi = phi[idx_feat]
+        # Invert the rotation by negating the sign of phi, this is possible only in the 2D case
+        return rotate_2d(phi=-phi, x=x[..., [0, 1]])
+
+    def _decode_velocity(
+        self, x: torch.Tensor, ego_velocity: torch.Tensor, idx_feat: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Decode the [normal, tangential] velocity into cartesian [x, y] components by rotating it by the azimuthal
+        position.
+        :param x:
+        :param ego_velocity:
+        :param idx_feat:
+        :return:
+        """
+        phi = self.feature_vectors_angular_centers[:, 1]
+        if idx_feat is not None:
+            x = x[..., idx_feat, :]
+            phi = phi[idx_feat]
+
+        x = rotate_2d(phi=phi, x=x)
+        return x + ego_velocity
 
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
