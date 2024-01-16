@@ -161,6 +161,47 @@ def angle_to_neg_pi_to_pi(angle: torch.Tensor):
 
 
 @torch.jit.script
+def get_corners_3d(centers: torch.Tensor, wlh: torch.Tensor, orientation: torch.Tensor) -> torch.Tensor:
+    """
+    The corner ordering is/has to be compliant with the specification in pytorch3d.ops.box3d_overlap
+    Calculate the 3D box corners. The coordinate system is aligned as:
+        x -> forward
+        y -> left
+        z -> up
+    :param centers: Cartesian coordinates of the centers [N, 3]
+    :param wlh: Boxes width, length and height [N, 3]
+    :param orientation: Orientation matrices [N, 3, 3]
+    :return: Cartesian coordinates of the 8 corners [N, 8, 3]
+    """
+    unit_box_corners = torch.tensor(
+        [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 1, 1],
+        ],
+        device=centers.device,
+        dtype=centers.dtype,
+    )
+    unit_box_corners -= 0.5
+    # Scale each box; Take care that sizes are given in the format wlh and the unit box is xyz
+    corners = (
+        unit_box_corners * wlh.index_select(dim=-1, index=torch.tensor([1, 0, 2], device=centers.device))[..., None, :]
+    )
+    # Rotate each box individually -> (N,8,3):
+    #   - keeps N boxes
+    #   - contracts last dimension of rotation matrix with the 3 coordinate values of each point
+    #   - produces M new corners in 3D
+    # [N, 3, 3] x [N, 8, 3]
+    # Shift all boxes to align with their respective center
+    return torch.einsum("...jk,...lk->...lj", orientation, corners) + centers[..., None, :]
+
+
+@torch.jit.script
 def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
     """
     Converts 6D rotation representation by Zhou et al. [1] to rotation matrix
@@ -203,3 +244,58 @@ def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
     """
     batch_dim = matrix.size()[:-2]
     return matrix[..., :2, :].clone().reshape(batch_dim + (6,))
+
+
+@torch.jit.script
+def get_spherical_projection_boundaries(
+    centers: torch.Tensor,
+    wlh: torch.Tensor,
+    orientation: torch.Tensor,
+    fov_pol: tuple[float, float],
+    fov_azi: tuple[float, float],
+    delta_pol: float,
+    delta_azi: float,
+) -> torch.Tensor:
+    # Get 8 corner points of 3D boxes [N, 8, 3]
+    corners = get_corners_3d(centers=centers, wlh=wlh, orientation=orientation)
+    # Transform cartesian corner coordinates to spherical coordinates
+    corners = cart_to_sph_torch(corners)
+    # Get the 3D box centers in spherical coordinates
+    centers = cart_to_sph_torch(centers)
+
+    # The below is required to rectify targets overlapping the angular ambiguity at +-pi
+    # Given a target that has corners with negative and positive azimuthal angle, or speaking in terms of the
+    #   featuremap some corners on the very left and some on the very right side.
+    # -> Most likely the target does not span almost 360° but rather just overlaps the angular ambiguity.
+
+    # Create a mask that indicates corners corresponding to such targets IFF the center is at least pi/2 from
+    #   the center of the featuremap located at 0°.
+    mask = ~(centers[:, None, 2].sign() == corners[:, :, 2].sign()) & (centers[:, None, 2].abs() > torch.pi / 2)
+    fold_over = torch.nonzero(mask).unbind(-1)
+    # Those masked corners are now either on the left or right side of the featuremap and have the opposite sign
+    #   of the corresponding center. Now we need to shift them by +- 2 pi so that they exit the featuremap on
+    #   the other side but have the same sign as the center angle.
+    # This is done by adding SIGN(center) * 2 * pi to the angle:
+    #   - If the center is on the left side (has negative angle) then the corners from the right side will be
+    #       subtracted 2 pi and thus shifted to the left
+    #   - If the center is on the right side (has positive angle) then the corners from the left side will be
+    #       added 2 pi and thus shifted to the right
+    corners[fold_over[0], fold_over[1], 2] += centers[fold_over[0], 2].sign() * torch.pi * 2
+    # TODO: Make sure polar/vertical position is not flipped either
+
+    # Now all corners are shifted s.t. the angular range is not [-pi, pi] but instead [0, 2 * pi] and equivalently
+    #   for the polar (not problematic) angle
+    corners[:, :, 1] -= fov_pol[0]
+    corners[:, :, 2] -= fov_azi[0]
+
+    # Get the minimum and maximum azimuthal/polar coordinate values per 3D box corner (note the dimension reorder)
+    min_vals = corners[:, :, [2, 1]].min(dim=1).values
+    max_vals = corners[:, :, [2, 1]].max(dim=1).values
+
+    # Stack min/max in a [x, y, x, y] fashion
+    boundaries = torch.cat((min_vals, max_vals), dim=1)
+
+    # Compute box coordinates
+    boundaries[:, [0, 2]] = boundaries[:, [0, 2]] / delta_azi
+    boundaries[:, [1, 3]] = boundaries[:, [1, 3]] / delta_pol
+    return boundaries
