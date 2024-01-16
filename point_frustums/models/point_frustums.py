@@ -6,12 +6,14 @@ from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
 
 from point_frustums.config_dataclasses.dataset import DatasetConfig
-from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification
+from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification, TargetAssignment
 from point_frustums.utils.geometry import (
+    get_spherical_projection_boundaries,
     rotate_2d,
     rotation_matrix_from_spherical,
     rotation_6d_to_matrix,
     matrix_to_rotation_6d,
+    iou_vol_3d,
 )
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
@@ -19,6 +21,7 @@ from .base_models import Detection3DModel
 from .base_runtime import Detection3DRuntime
 from .heads import PointFrustumsHead
 from .necks import PointFrustumsNeck
+from .training.target_assignment import match_target_projection_to_receptive_field, sinkhorn
 
 
 class PointFrustumsModel(Detection3DModel):
@@ -35,11 +38,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         *args,
         model: PointFrustumsModel,
         dataset: DatasetConfig,
+        target_assignment: TargetAssignment,
         # losses: LossesConfig,
         **kwargs,
     ):
         super().__init__(*args, model=model, dataset=dataset, **kwargs)
-        # TODO: Add loss functions
+        self.target_assignment = target_assignment
         # TODO: Add postprocessing step
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
@@ -357,6 +361,129 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         x = rotate_2d(phi=phi, x=x)
         return x + ego_velocity
+
+    def assign_target_index_to_features(
+        self,
+        targets: Targets,
+        target_labels: torch.Tensor,
+        target_corners: torch.Tensor,
+        feat_labels: torch.Tensor,
+        feat_centers: torch.Tensor,
+        feat_corners: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Assign a target to each feature vector of the concatenated featuremaps. Apply to a single sample from the batch.
+        :param targets:
+        :param target_corners:
+        :param target_labels:
+        :param feat_labels:
+        :param feat_centers:
+        :param feat_corners:
+        :return: An integer tensor where -1 represents background and all values >= 0 correspond to one of the targets.
+        """
+        if target_labels is None:
+            return torch.full((self.featuremap_parametrization.total_size,), -1, device=self.device)
+
+        targets_spherical_projection = get_spherical_projection_boundaries(
+            centers=targets.center,
+            wlh=targets.wlh,
+            orientation=targets.orientation,
+            fov_pol=self.discretization.fov_pol,
+            fov_azi=self.discretization.fov_azi,
+            delta_pol=self.discretization.delta_pol,
+            delta_azi=self.discretization.delta_azi,
+        )
+        binary_pre_mapping = match_target_projection_to_receptive_field(
+            targets_projections=targets_spherical_projection,
+            rf_centers=self.receptive_fields_centers,
+            rf_sizes=self.receptive_fields_sizes,
+            layer_sizes_flat=self.featuremap_parametrization.layer_sizes_flat,
+            base_featuremap_width=self.model.backbone.lidar.discretize.n_splits_azi,
+        )
+
+        # Get the indices that map between feature vectors and targets
+        #   Column 0: Indices of feature vectors, use to obtain a subset of predictions that can be mapped to targets
+        #   Column 1: Indices of targets, use to broadcast targets to the assigned subset of feature vectors
+        idx = torch.nonzero(binary_pre_mapping).unbind(-1)
+
+        # Evaluate pairwise IoU between the matched subset of predictions corresponding targets
+        iou = torch.zeros_like(binary_pre_mapping, dtype=torch.float).index_put_(
+            idx, iou_vol_3d(feat_corners[idx[0], ...], target_corners[idx[1], ...])[0]
+        )
+        # Initialize the center distance to all zeros
+        center_distance = torch.zeros_like(binary_pre_mapping).float()
+        # Calculate the cartesian distances between predictions and mapped targets (prev.: the distance of radius)
+        center_distance[idx] = (feat_centers[idx[0], :] - targets.center[idx[1], :]).norm(dim=-1)
+        # Normalize the distance by a factor based on the target box size
+        center_distance[idx] = center_distance[idx].div(targets.wlh[idx[1], :].norm(dim=-1))
+        # Squash the relative distance to the range [0, 1) by application of tanh
+        #   The division by the empirical factor kappa shifts the relevant range into dynamic range of tanh
+        center_distance[idx] = center_distance[idx].div(self.target_assignment.kappa).tanh()
+
+        # Broadcast one-hot encoded labels s.t. the first 2 dimensions match the shape of the binary mapping and
+        # evaluate the focal loss
+        cost_classification: torch.Tensor = sigmoid_focal_loss(
+            feat_labels[:, None, :].expand(binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)),
+            target_labels[None, :, :].expand(binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)),
+            reduction="none",
+        ).sum(dim=-1)
+
+        # Evaluate the focal loss against the all-zero labels to use as classification cost for the supplementary
+        # background class
+        background_labels = torch.zeros_like(feat_labels)
+        cost_background = sigmoid_focal_loss(feat_labels, background_labels, reduction="none").sum(dim=-1).tanh()
+        # Shift by the factors beta and gamma to ensure that the pre-assigned background will have no smaller cost than
+        # any point on the foreground ever
+        cost_background += self.target_assignment.beta + self.target_assignment.gamma
+
+        # Combine classification/regression and background cost
+        cost_classification = cost_classification.tanh()
+        min_fg_cost = cost_classification[binary_pre_mapping].max()
+        cost_classification[~binary_pre_mapping] = torch.clamp(
+            cost_classification[~binary_pre_mapping], min=min_fg_cost + 1e-2
+        )
+        # Initialize to the bias which ensures that the background is never assigned lower cost than the foreground
+        cost = (self.target_assignment.beta + self.target_assignment.gamma) * (~binary_pre_mapping).float()
+        # Add the scaled classification cost
+        cost += self.target_assignment.alpha * cost_classification.tanh()
+        # Add the scaled IoU cost
+        cost += self.target_assignment.beta * (1 - iou)
+        # Add the scaled center distance cost
+        cost += self.target_assignment.gamma * center_distance
+        # Concatenate the pre-determined background class cost
+        cost = torch.cat((cost, cost_background[:, None]), dim=1)
+
+        # Set the demand to ones as each prediction requires to be assigned to exactly one class (object or background)
+        demand = torch.ones((self.featuremap_parametrization.total_size,), device=self.device).float()
+        # Based on the IoU, evaluate how many predictions each of the targets can supply, constrain by min_k and top_k
+        supply = torch.topk(iou, dim=0, k=self.target_assignment.min_k).values.sum(dim=0)
+        supply = torch.clamp(supply, min=self.target_assignment.min_k)
+        # Append the unassigned supply for the background class (note: tensor.sum returns a 0D tensor)
+        unassigned_supply = self.featuremap_parametrization.total_size - supply.sum()
+        supply = torch.cat((supply, unassigned_supply[None]))
+
+        # Evaluate the transport plan PI of the optimal transport problem (Comprehensive read: arXiv:1803.00567 p 62-84)
+        # The implemented algorithm is a version by renown researchers from the field but tricky to derive
+        pi = sinkhorn(
+            cost=cost,
+            row_marginals=demand,
+            col_marginals=supply,
+            eps=self.target_assignment.epsilon,
+            threshold=self.target_assignment.threshold,
+            iter_max=self.target_assignment.max_iter,
+        )
+
+        # Rescale s.t. the maximum pi for each target equals 1.
+        scale_factor, _ = pi.max(dim=0)
+        pi = pi / scale_factor[None, :]
+        # Select the target with the highest value of PI for each patch (if the last row -> background)
+        _, match_index = pi.max(dim=1)
+
+        # Assign entries that matched the last/background row to the background i.e. -1
+        foreground_index = match_index != binary_pre_mapping.shape[1]
+        match_index[~foreground_index] = -1
+
+        return match_index
 
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
