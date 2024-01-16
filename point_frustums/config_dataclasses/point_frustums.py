@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from point_frustums.utils import geometry
@@ -10,33 +10,49 @@ class ModelOutputSpecification:
     strides: list[tuple[int, int]]
     layer_sizes: list[tuple[int, int]]
     layer_sizes_flat: list[int]
+    total_size: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Loss:
     active: bool = True
     weight: float = 1.0
+    kwargs: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Losses:
+    label: Loss
+    attribute: Loss
+    vfl: Loss
+    center_radial: Loss = Loss(kwargs={"beta": 0.2})
+    center_angular: Loss = Loss(kwargs={"beta": 0.5})
+    wlh: Loss = Loss()
+    orientation: Loss = Loss(kwargs={"beta": 0.1})
+    velocity: Loss = Loss()
 
 
 @dataclass(frozen=True)
 class TargetAssignment:
     # Parametrize the weights of {classification, IoU, radial distance}
-    alpha: float = 1.0
+    alpha: float = 1.2
     beta: float = 1.0
     gamma: float = 1.0
 
     # Scaling factor applied to the center distance before tanh
-    kappa: float = 5.0
+    kappa: float = 4.0
 
     # Minimum number of predictions assigned to each target
-    min_k: int = 1
+    min_k: int = 2
     # Limit the supply (maximum number of predictions assigned to each target)
     max_k: int = 20
 
     # Stopping criterion for the Sinkhorn iteration
-    threshold: float = 1e-2
+    threshold: float = 1e-5
     # Scaling factor used in the Sinkhorn iteration
     epsilon: float = 2e-1
+    # The maximum number of iterations to perform
+    max_iter: int = 2500
 
 
 @dataclass(slots=True, kw_only=True)
