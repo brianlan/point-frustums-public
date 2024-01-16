@@ -299,3 +299,27 @@ def get_spherical_projection_boundaries(
     boundaries[:, [0, 2]] = boundaries[:, [0, 2]] / delta_azi
     boundaries[:, [1, 3]] = boundaries[:, [1, 3]] / delta_pol
     return boundaries
+
+
+@torch.jit.script
+def iou_vol_3d(boxes1: torch.Tensor, boxes2: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Calculate the 3D IoU between 2 sets of input boxes defined by 8 corner points. If the input is of shape
+    boxes1.shape==boxes2.shape==[N, 8, 3] computes the pairwise IoU of shape [N], else if boxes1.shape==[N, 1, 8, 3] and
+    boxes2.shape==[1, M, 8, 3] broadcasts to the binary IoU of shape [N, M].
+    :param boxes1:
+    :param boxes2:
+    :return:
+    """
+    if boxes1.shape == boxes2.shape and boxes1.dim() == 3:
+        vol, iou = torch.ops.point_frustums.iou_box3d_pairwise(boxes1, boxes2)
+    elif boxes1.size(1) == 1 and boxes2.size(0) == 1 and boxes1.dim() == 4:
+        boxes1, boxes2 = boxes1[:, 0, :, :], boxes2[0, :, :, :]
+        vol, iou = torch.ops.point_frustums.iou_box3d(boxes1, boxes2)
+    else:
+        raise ValueError(
+            f"Invalid input shapes {boxes1.shape}, {boxes2.shape}; please provide either both as "
+            f"[N, 8, 3] or boxes1.shape==[N,1,8,3] and boxes2.shape==[1,M,8,3]."
+        )
+
+    return iou, vol
