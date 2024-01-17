@@ -10,7 +10,7 @@ class PointFrustumsBackbone(Backbone):
         self.camera = camera
         self.radar = radar
 
-    def forward_lidar(self, lidar: Tensor) -> Tensor:
+    def forward_lidar(self, lidar: list[Tensor]) -> Tensor:
         return self.lidar(lidar)
 
     def forward_camera(self, camera: Tensor) -> Tensor:

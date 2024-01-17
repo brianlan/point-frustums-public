@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from typing import Optional
 
 import torch
@@ -65,7 +64,7 @@ class FPN(nn.Module):
         self,
         n_channels_in: int,
         n_channels_out: int,
-        layers: Mapping[str, ConfigFPNLayer],
+        layers: dict[str, ConfigFPNLayer],
         extra_layers: Optional[dict[str, ConfigFPNExtraLayer]] = None,
         dropout: float = 0.0,
         upsampling_mode: str = "bilinear",
@@ -76,9 +75,11 @@ class FPN(nn.Module):
         self.dropout = dropout
         self.upsampling_mode = upsampling_mode
         self.layers = dict(sorted(layers.items()))
-        layers_keys = list(layers.keys())
-        self.first_layer, self.last_layer = layers_keys[0], layers_keys[-1]
+        self.names_layers = tuple(self.layers.keys())
+        self.names_layers_reversed = tuple(reversed(self.names_layers))
+        self.first_layer, self.last_layer = self.names_layers[0], self.names_layers[-1]
         self.extra_layers = dict(sorted(extra_layers.items())) if extra_layers is not None else {}
+        self.names_extra_layers = tuple(self.extra_layers.keys())
 
         self.strides = {}
         self.up, self.lateral, self.down, self.post = self.build_layers()
@@ -105,7 +106,7 @@ class FPN(nn.Module):
         )
         return block
 
-    def build_layers(self) -> tuple[nn.ModuleDict, nn.ModuleDict, nn.ModuleDict, nn.ModuleDict]:
+    def build_layers(self) -> tuple[nn.ModuleList, nn.ModuleList, nn.ModuleList, nn.ModuleList]:
         """Build the layers of the FPN.
         A FPN layer consists of several components:
             1. The top-down path is made up of a series of blocks (the first sets the size and dimension for the layer)
@@ -158,51 +159,56 @@ class FPN(nn.Module):
                 )
             prev = name
 
-        return nn.ModuleDict(up), nn.ModuleDict(lateral), nn.ModuleDict(down), nn.ModuleDict(post)
+        up = nn.ModuleList([up[layer] for layer in self.names_layers])
+        lateral = nn.ModuleList([lateral[layer] for layer in self.names_layers])
+        down = nn.ModuleList([down[layer] for layer in self.names_layers_reversed if layer in down])
+        post = nn.ModuleList([post[layer] for layer in self.names_layers_reversed if layer in post])
 
-    def build_extra_layers(self) -> tuple[nn.ModuleDict, nn.ModuleDict]:
+        return up, lateral, down, post
+
+    def build_extra_layers(self) -> tuple[nn.ModuleList, nn.ModuleList]:
         prev = list(self.strides.keys())[-1]
-        extra_layers = {}
-        extra_layers_post = {}
+        extra_layers = nn.ModuleList()
+        extra_layers_post = nn.ModuleList()
         n_channels_in = self.layers[self.last_layer].n_channels * self.block.expansion
         for name, layer in self.extra_layers.items():
             self.strides[name] = (layer.stride[0] * self.strides[prev][0], layer.stride[1] * self.strides[prev][1])
-            extra_layers[name] = nn.Sequential(
-                nn.Dropout(self.dropout),
-                Conv2dSpherical(n_channels_in, n_channels_in, kernel_size=3, stride=layer.stride),
-                self.norm_layer(n_channels_in),
+            extra_layers.append(
+                nn.Sequential(
+                    nn.Dropout(self.dropout),
+                    Conv2dSpherical(n_channels_in, n_channels_in, kernel_size=3, stride=layer.stride),
+                    self.norm_layer(n_channels_in),
+                )
             )
-            extra_layers_post[name] = nn.Sequential(
-                nn.Dropout2d(self.dropout),
-                Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3),
-                self.norm_layer(self.n_channels_out),
+            extra_layers_post.append(
+                nn.Sequential(
+                    nn.Dropout2d(self.dropout),
+                    Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3),
+                    self.norm_layer(self.n_channels_out),
+                )
             )
             prev = name
-        return nn.ModuleDict(extra_layers), nn.ModuleDict(extra_layers_post)
+        return extra_layers, extra_layers_post
 
     def forward(self, input: torch.Tensor) -> dict[str, torch.Tensor]:
         """Forward pass of the FPN"""
         results = {}
 
         # Walk through the bottom-up path and directly apply the lateral FC layer
-        for layer in self.layers.keys():
-            input = self.up[layer](input)
-            results[layer] = self.lateral[layer](input)
+        for layer, up, lateral in zip(self.names_layers, self.up, self.lateral):
+            input = up(input)
+            results[layer] = lateral(input)
 
         # Evaluate extra layers, building on the result of the last bottom-up layer
-        for layer in self.extra_layers.keys():
-            input = self.extra[layer](input)
-            results[layer] = self.extra_post[layer](input)
+        for layer, extra, extra_post in zip(self.names_extra_layers, self.extra, self.extra_post):
+            input = extra(input)
+            results[layer] = extra_post(input)
 
         # Walk through the top-down path, add the up-sampled featuremaps to the intermediate result, apply the FC layer
-        input = None
-        for layer in reversed(self.layers.keys()):
-            if input is None:
-                # The upmost layer is used directly as returned by the bottom-up path
-                input = results[layer]
-                continue
-            results[layer] += self.down[layer](input)
+        input = results[self.names_layers_reversed[0]]
+        for layer, down, post in zip(self.names_layers_reversed[1:], self.down, self.post):
+            results[layer] += down(input)
             input = results[layer]
-            results[layer] = self.post[layer](results[layer])
+            results[layer] = post(results[layer])
 
         return results

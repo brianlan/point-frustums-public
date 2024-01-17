@@ -336,7 +336,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
-        channels_in: tuple[str, ...],
+        channels_in: list[str, ...],
         discretize: ConfigDiscretize,
         decorate: ConfigDecorate,
         vectorize: ConfigVectorize,
@@ -406,7 +406,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
                 channels.append(self.channels_in.index(channel))
         return channels
 
-    def filter_fov(self, pc):
+    def filter_fov(self, pc: torch.Tensor) -> torch.Tensor:
         channel_index_azi, channel_index_pol = self.channels_in.index("azimuthal"), self.channels_in.index("polar")
         mask = (
             (pc[:, channel_index_azi] >= self.discretize.fov_azi[0])
@@ -414,7 +414,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
             & (pc[:, channel_index_pol] >= self.discretize.fov_pol[0])
             & (pc[:, channel_index_pol] < self.discretize.fov_pol[1])
         )
-        return pc[mask]
+        return pc[mask, ...]
 
     def get_frustum_index(self, pc: torch.Tensor):
         channel_index_azi, channel_index_pol = self.channels_in.index("azimuthal"), self.channels_in.index("polar")
@@ -500,7 +500,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
             featuremap.extend(
                 self.apply_symmetric_functions(
                     pc=self.ffn_vectorize(pc),
-                    n_frustums=self.discretize.n_splits,
+                    n_frustums=self.n_splits,
                     i_frustum=i_frustum,
                     i_inv=i_inv,
                     counts_padded=counts_padded,
@@ -512,7 +512,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
 
         return torch.cat(featuremap, dim=1)
 
-    def forward(self, batch: Sequence[torch.Tensor]) -> torch.Tensor:
+    def forward(self, batch: list[torch.Tensor]) -> torch.Tensor:
         batch_size = len(batch)
         features = batch[0].new_empty((batch_size, self.discretize.n_splits, self.n_channels["squashed"]))
 

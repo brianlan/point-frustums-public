@@ -1,8 +1,9 @@
 from typing import Literal, Optional
 from math import prod, exp, isclose
+from copy import deepcopy
 
 import torch
-from torch import nn
+from torch import nn, optim
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
 
@@ -31,10 +32,7 @@ from .training.target_assignment import match_target_projection_to_receptive_fie
 
 class PointFrustumsModel(Detection3DModel):
     def __init__(self, backbone: PointFrustumsBackbone, neck: PointFrustumsNeck, head: PointFrustumsHead):
-        super().__init__()
-        self.backbone = backbone
-        self.neck = neck
-        self.head = head
+        super().__init__(backbone, neck, head)
 
 
 class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
@@ -48,6 +46,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         **kwargs,
     ):
         super().__init__(*args, model=model, dataset=dataset, **kwargs)
+        self.discretization = deepcopy(self.model.backbone.lidar.discretize)
+        self.strides = deepcopy(self.model.neck.fpn.strides)
+        self.fpn_layers = deepcopy(self.model.neck.fpn.layers)
+        self.fpn_extra_layers = deepcopy(self.model.neck.fpn.extra_layers)
         self.target_assignment = target_assignment
         self.losses = losses
         # TODO: Add postprocessing step
@@ -88,7 +90,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         _strides_pol_prev = []
         _strides_azi_prev = []
 
-        for layer, specs in self.model.neck.fpn.layers.items():
+        for layer, specs in self.fpn_layers.items():
             layers.append(layer)
             kernels[layer] = _kernels_prev + specs.n_blocks * [3]
             layer_stride_pol, layer_stride_azi = specs.stride
@@ -99,7 +101,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             _strides_pol_prev = strides_pol[layer]
             _strides_azi_prev = strides_azi[layer]
 
-        for extra_layer, specs in self.model.neck.fpn.extra_layers.items():
+        for extra_layer, specs in self.fpn_extra_layers.items():
             layers.append(extra_layer)
             kernels[extra_layer] = _kernels_prev + [3]
             strides_pol[extra_layer] = _strides_pol_prev + [specs.stride[0]]
@@ -146,13 +148,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         layers_rfs = list(zip(layers_rfs_pol.values(), layers_rfs_azi.values()))
         reference_boxes_centered = 0.5 * torch.tensor(layers_rfs).repeat(1, 2) * torch.tensor([-1, -1, 1, 1])
 
-        discretize = self.model.backbone.lidar.discretize
-        strides = self.model.neck.fpn.strides.values()
+        discretize = self.discretization
 
         size_per_layer = []
         size_per_layer_flat = []
         feat_rfs_center = []
-        for layer, stride in self.model.neck.fpn.strides.items():
+        for layer, stride in self.strides.items():
             assert isclose(discretize.n_splits_pol % stride[0], 0), (
                 f"The polar input featuremap resolution {discretize.n_splits_pol} is not divisible by the stride "
                 f"{stride[0]} on layer {layer}."
@@ -192,7 +193,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.register_buffer("feat_center_pol_azi", feat_center_pol_azi)
 
         return ModelOutputSpecification(
-            strides=list(strides),
+            strides=list(self.strides.values()),
             layer_sizes=size_per_layer,
             layer_sizes_flat=size_per_layer_flat,
             total_size=sum(size_per_layer_flat),
@@ -235,8 +236,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
         x[..., [1, 2]] -= center_pol_azi
-        x[..., 1] /= self.model.backbone.lidar.discretize.delta_pol
-        x[..., 2] /= self.model.backbone.lidar.discretize.delta_azi
+        x[..., 1] /= self.discretization.delta_pol
+        x[..., 2] /= self.discretization.delta_azi
         return x
 
     def _decode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -251,8 +252,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             x = x[..., idx_feat, :]
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
-        x[..., 1] *= self.model.backbone.lidar.discretize.delta_pol
-        x[..., 2] *= self.model.backbone.lidar.discretize.delta_azi
+        x[..., 1] *= self.discretization.delta_pol
+        x[..., 2] *= self.discretization.delta_azi
         x[..., [1, 2]] += center_pol_azi
         return x
 
@@ -372,7 +373,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             rf_centers=self.receptive_fields_centers,
             rf_sizes=self.receptive_fields_sizes,
             layer_sizes_flat=self.featuremap_parametrization.layer_sizes_flat,
-            base_featuremap_width=self.model.backbone.lidar.discretize.n_splits_azi,
+            base_featuremap_width=self.discretization.n_splits_azi,
         )
 
         # Get the indices that map between feature vectors and targets
@@ -552,12 +553,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     def get_losses(
         self,
         predictions: dict[
-            Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "iou"], dict[str, torch.Tensor]
+            Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "vfl"], dict[str, torch.Tensor]
         ],
         targets: list[Targets],
         ego_velocities: list[torch.Tensor],
     ) -> dict[
-        Literal["class", "attribute", "iou", "center_radial", "center_angular", "wlh", "orientation", "velocity"],
+        Literal["class", "attribute", "vfl", "center_radial", "center_angular", "wlh", "orientation", "velocity"],
         torch.Tensor,
     ]:
         # Flatten the last 2 dimensions of all predictions featuremaps, swap dimensions  and concatenate
@@ -618,7 +619,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         losses = {
             "class": sigmoid_focal_loss(predictions["class"], targets_label, reduction="sum"),
             "attribute": sigmoid_focal_loss(predictions["attribute"], targets_attribute, reduction="sum"),
-            "vfl": vfl(predictions["iou"], targets_iou, reduction="sum", **self.losses.vfl.kwargs),
+            "vfl": vfl(predictions["vfl"], targets_iou, reduction="sum", **self.losses.vfl.kwargs),
         }
 
         # Evaluate the losses that are applied only to the foreground (center/wlh/orientation/velocity)
@@ -690,5 +691,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     def test_step(self, batch, batch_idx):
         pass
 
-    def configure_optimizers(self):
-        pass
+    def configure_optimizers(self, *args, **kwargs):
+        optimizer = optim.AdamW(self.parameters())
+        # lr_scheduler = optim.lr_scheduler.OneCycleLR(optimizer)
+        return [optimizer], []

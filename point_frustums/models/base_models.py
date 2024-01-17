@@ -1,5 +1,4 @@
 from typing import Optional
-from collections.abc import Mapping, MutableMapping
 from abc import ABCMeta, abstractmethod
 
 from torch import nn, Tensor
@@ -7,7 +6,7 @@ from torch import nn, Tensor
 
 class Backbone(nn.Module, metaclass=ABCMeta):
     @abstractmethod
-    def forward_lidar(self, lidar: Tensor) -> Tensor:
+    def forward_lidar(self, lidar: list[Tensor]) -> Tensor:
         pass
 
     @abstractmethod
@@ -20,16 +19,11 @@ class Backbone(nn.Module, metaclass=ABCMeta):
 
     def forward(
         self,
-        lidar: Optional[MutableMapping[str, Tensor]] = None,
-        camera: Optional[MutableMapping[str, Tensor]] = None,
-        radar: Optional[MutableMapping[str, Tensor]] = None,
-    ) -> tuple[
-        Optional[MutableMapping[str, Tensor]],
-        Optional[MutableMapping[str, Tensor]],
-        Optional[MutableMapping[str, Tensor]],
-    ]:
-        if lidar is not None:
-            lidar = {sensor: self.forward_lidar(data) for sensor, data in lidar.items()}
+        lidar: dict[str, list[Tensor]],
+        camera: Optional[dict[str, Tensor]] = None,
+        radar: Optional[dict[str, Tensor]] = None,
+    ) -> tuple[dict[str, Tensor], Optional[dict[str, Tensor]], Optional[dict[str, Tensor]],]:
+        lidar = {sensor: self.forward_lidar(data) for sensor, data in lidar.items()}
 
         if camera is not None:
             camera = {sensor: self.forward_camera(data) for sensor, data in camera.items()}
@@ -44,30 +38,32 @@ class Neck(nn.Module, metaclass=ABCMeta):
     @abstractmethod
     def forward(
         self,
-        lidar: Optional[MutableMapping[str, Tensor]],
-        camera: Optional[MutableMapping[str, Tensor]],
-        radar: Optional[MutableMapping[str, Tensor]],
-    ) -> Tensor | Mapping[str, Tensor]:
+        lidar: dict[str, Tensor],
+        camera: Optional[dict[str, Tensor]],
+        radar: Optional[dict[str, Tensor]],
+    ) -> dict[str, Tensor]:
         pass
 
 
 class Head(nn.Module, metaclass=ABCMeta):
     @abstractmethod
-    def forward(self, features: Tensor | Mapping[str, Tensor]) -> Mapping[str, Tensor]:
+    def forward(self, features: Tensor | dict[str, Tensor]) -> dict[str, Tensor]:
         pass
 
 
 class Detection3DModel(nn.Module):
-    backbone: Backbone
-    neck: Neck
-    head: Head
+    def __init__(self, backbone: Backbone, neck: Neck, head: Head):
+        super().__init__()
+        self.backbone = backbone
+        self.neck = neck
+        self.head = head
 
     def forward(
         self,
-        lidar: Optional[MutableMapping[str, Tensor]] = None,
-        camera: Optional[MutableMapping[str, Tensor]] = None,
-        radar: Optional[MutableMapping[str, Tensor]] = None,
-    ):
+        lidar: dict[str, list[Tensor]],
+        camera: Optional[dict[str, Tensor]] = None,
+        radar: Optional[dict[str, Tensor]] = None,
+    ) -> dict[str, dict[str, Tensor]]:
         lidar, camera, radar = self.backbone(lidar=lidar, camera=camera, radar=radar)
         features = self.neck(lidar=lidar, camera=camera, radar=radar)
         return self.head(features=features)

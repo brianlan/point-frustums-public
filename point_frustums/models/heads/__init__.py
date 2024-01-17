@@ -23,7 +23,7 @@ class PointFrustumsHead(Head):
     ):
         super().__init__()
         self.n_channels_in = n_channels_in
-        self.layers_in = layers_in
+        self.layers_in = tuple(layers_in)
         self.n_convolutions_classification = n_convolutions_classification
         self.n_convolutions_regression = n_convolutions_regression
         self.share_weights = share_weights
@@ -40,7 +40,7 @@ class PointFrustumsHead(Head):
         self.head_classification = self.build_head(self.spec_cls, n_convolutions_classification, share_weights)
         self.head_regression = self.build_head(self.spec_reg, n_convolutions_regression, share_weights)
 
-    def build_head(self, outputs: dict[str, int], n_convolutions: int, share_weights: bool = True):
+    def build_head(self, outputs: dict[str, int], n_convolutions: int, share_weights: bool = True) -> nn.ModuleList:
         """
         Builds a head with several convolutional layers and one final layer that stacks the specified outputs.
         If `share_weights` is False, the built head is duplicated, otherwise it is reused for each layer.
@@ -63,26 +63,31 @@ class PointFrustumsHead(Head):
         layers.append(Conv2dSpherical(self.n_channels_in, n_channels_out, kernel_size=1))
         layers = nn.Sequential(*layers)
 
-        head = nn.ModuleDict()
-        for layer in self.layers_in:
+        head = nn.ModuleList()
+        for _ in self.layers_in:
             if not share_weights:
                 layers = deepcopy(layers)
-            head[layer] = layers
+            head.append(layers)
 
         return head
 
-    def forward(self, features: Mapping[str, Tensor]) -> dict[str, dict[str, Tensor]]:
+    def forward(self, features: dict[str, Tensor]) -> dict[str, dict[str, Tensor]]:
         classification = {}
         regression = {}
-        for layer in self.layers_in:
-            classification[layer] = self.head_classification[layer](features[layer])
-            regression[layer] = self.head_regression[layer](features[layer])
+        for layer, head_cls, head_reg in zip(self.layers_in, self.head_classification, self.head_regression):
+            classification[layer] = head_cls(features[layer])
+            regression[layer] = head_reg(features[layer])
 
         out = {k: {} for k in self.out_keys}
         for layer in self.layers_in:
             cls = classification[layer].split(self.split_sizes_classification, dim=1)
             reg = regression[layer].split(self.split_sizes_regression, dim=1)
-            for head, tensor in zip(self.out_keys, cls + reg):
-                out[head][layer] = tensor
+            out["class"][layer] = cls[0]
+            out["attribute"][layer] = cls[1]
+            out["center"][layer] = reg[0]
+            out["wlh"][layer] = reg[1]
+            out["orientation"][layer] = reg[2]
+            out["velocity"][layer] = reg[3]
+            out["vfl"][layer] = reg[4]
 
         return out

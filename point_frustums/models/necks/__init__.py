@@ -49,10 +49,10 @@ class PointFrustumsNeck(Neck):
 
     def forward(
         self,
-        lidar: MutableMapping[str, Tensor],
-        camera: Optional[MutableMapping[str, Tensor]] = None,
-        radar: Optional[MutableMapping[str, Tensor]] = None,
-    ) -> Tensor | Mapping[str, Tensor]:
+        lidar: dict[str, Tensor],
+        camera: Optional[dict[str, Tensor]] = None,
+        radar: Optional[dict[str, Tensor]] = None,
+    ) -> dict[str, Tensor]:
         featuremap = [lidar[self.target_sensor]]
         # TODO: Implement the mapping in case multiple LiDAR sensors are used
         # TODO: Implement the fusion functions; have to be executed for each sensor
