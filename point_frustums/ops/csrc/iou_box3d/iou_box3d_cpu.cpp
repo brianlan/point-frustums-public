@@ -66,19 +66,17 @@ std::tuple<at::Tensor, at::Tensor> IoUBox3DCpu(
       //    inside the plane and part of the intersecting tetrahedron.
 
       // Tris in Box1 -> Planes in Box2
-      face_verts box1_intersect =
-          BoxIntersections(box1_tris, box2_planes, box2_center);
+      face_verts box1_intersect = BoxIntersections(box1_tris, box2_planes, box2_center);
       // Tris in Box2 -> Planes in Box1
-      face_verts box2_intersect =
-          BoxIntersections(box2_tris, box1_planes, box1_center);
+      face_verts box2_intersect = BoxIntersections(box2_tris, box1_planes, box1_center);
 
       // If there are overlapping regions in Box2, remove any coplanar faces
       if (box2_intersect.size() > 0) {
         // Identify if any triangles in Box2 are coplanar with Box1
         std::vector<int> tri2_keep(box2_intersect.size());
         std::fill(tri2_keep.begin(), tri2_keep.end(), 1);
-        for (int b1 = 0; b1 < box1_intersect.size(); ++b1) {
-          for (int b2 = 0; b2 < box2_intersect.size(); ++b2) {
+        for (size_t b1 = 0; b1 < box1_intersect.size(); ++b1) {
+          for (size_t b2 = 0; b2 < box2_intersect.size(); ++b2) {
             const bool is_coplanar =
                 IsCoplanarTriTri(box1_intersect[b1], box2_intersect[b2]);
             const float area = FaceArea(box1_intersect[b1]);
@@ -90,7 +88,7 @@ std::tuple<at::Tensor, at::Tensor> IoUBox3DCpu(
 
         // Keep only the non coplanar triangles in Box2 - add them to the
         // Box1 triangles.
-        for (int b2 = 0; b2 < box2_intersect.size(); ++b2) {
+        for (size_t b2 = 0; b2 < box2_intersect.size(); ++b2) {
           if (tri2_keep[b2] == 1) {
             box1_intersect.push_back((box2_intersect[b2]));
           }
@@ -177,8 +175,8 @@ std::tuple<at::Tensor, at::Tensor> IoUBox3DCpuPairwise(
         // Identify if any triangles in Box2 are coplanar with Box1
         std::vector<int> tri2_keep(box2_intersect.size());
         std::fill(tri2_keep.begin(), tri2_keep.end(), 1);
-        for (int b1 = 0; b1 < box1_intersect.size(); ++b1) {
-          for (int b2 = 0; b2 < box2_intersect.size(); ++b2) {
+        for (size_t b1 = 0; b1 < box1_intersect.size(); ++b1) {
+          for (size_t b2 = 0; b2 < box2_intersect.size(); ++b2) {
             const bool is_coplanar = IsCoplanarTriTri(box1_intersect[b1], box2_intersect[b2]);
             const float area = FaceArea(box1_intersect[b1]);
             if ((is_coplanar) && (area > aEpsilon)) {
@@ -189,7 +187,7 @@ std::tuple<at::Tensor, at::Tensor> IoUBox3DCpuPairwise(
 
         // Keep only the non coplanar triangles in Box2 - add them to the
         // Box1 triangles.
-        for (int b2 = 0; b2 < box2_intersect.size(); ++b2) {
+        for (size_t b2 = 0; b2 < box2_intersect.size(); ++b2) {
           if (tri2_keep[b2] == 1) {
             box1_intersect.push_back((box2_intersect[b2]));
           }

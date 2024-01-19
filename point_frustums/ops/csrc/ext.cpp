@@ -1,4 +1,6 @@
 #include <torch/extension.h>
+#include "iou_box3d/iou_box3d.h"
+#include "nms/nms.h"
 
 namespace point_frustums {
 
@@ -74,5 +76,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 }
 
 TORCH_LIBRARY(point_frustums, m) {
+  m.def("iou_box3d", &IoUBox3D);
+  m.def("iou_box3d_pairwise", &IoUBox3DPairwise);
+  m.def("nms", &NMS);
 }
 } // namespace point_frustums
