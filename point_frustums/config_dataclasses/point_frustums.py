@@ -41,8 +41,10 @@ class Losses:
     velocity: Loss = Loss()
 
     @property
-    def losses(self) -> tuple[str, ...]:
-        return self.__slots__  # pylint: disable=no-member
+    def losses(self) -> list[str]:
+        losses = list(self.__slots__)  # pylint: disable=no-member
+        losses[losses.index("label")] = "class"
+        return losses
 
 
 @dataclass(frozen=True)

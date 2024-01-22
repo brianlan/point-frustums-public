@@ -63,6 +63,16 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # TODO: Add postprocessing step
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
+    def configure_model(self) -> None:
+        self.setup_logger()
+
+    def setup_logger(self):
+        if isinstance(self.logger.experiment, torch.utils.tensorboard.SummaryWriter):
+            losses = {
+                "Losses": {f"Loss/{l}": ["Multiline", [f"Loss/{l}/train", f"Loss/{l}/val"]] for l in self.losses.losses}
+            }
+            self.logger.experiment.add_custom_scalars(losses)
+
     def evaluate_receptive_fields(self) -> tuple[dict[str, float], dict[str, float]]:
         def get_rf(k: list, s: list) -> int:
             """
