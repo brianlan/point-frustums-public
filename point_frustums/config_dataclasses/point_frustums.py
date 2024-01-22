@@ -13,6 +13,15 @@ class ModelOutputSpecification:
     total_size: int
 
 
+@dataclass(slots=True, frozen=True)
+class Predictions:
+    score_vfl_factor: float = 0.3
+    score_threshold: float = 0.1
+    top_k: int = 1_000
+    n_detections: int = 100
+    nms_threshold: float = 0.6
+
+
 @dataclass(frozen=True, slots=True)
 class Loss:
     active: bool = True
@@ -30,6 +39,10 @@ class Losses:
     wlh: Loss = Loss()
     orientation: Loss = Loss(kwargs={"beta": 0.1})
     velocity: Loss = Loss()
+
+    @property
+    def losses(self) -> tuple[str, ...]:
+        return self.__slots__  # pylint: disable=no-member
 
 
 @dataclass(frozen=True)

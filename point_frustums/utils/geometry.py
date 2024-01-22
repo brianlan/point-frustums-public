@@ -309,7 +309,7 @@ def iou_vol_3d(boxes1: torch.Tensor, boxes2: torch.Tensor) -> tuple[torch.Tensor
     boxes2.shape==[1, M, 8, 3] broadcasts to the binary IoU of shape [N, M].
     :param boxes1:
     :param boxes2:
-    :return:
+    :return: The IoU and intersecting volume between the input boxes
     """
     if boxes1.shape == boxes2.shape and boxes1.dim() == 3:
         vol, iou = torch.ops.point_frustums.iou_box3d_pairwise(boxes1, boxes2)

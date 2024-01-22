@@ -8,7 +8,12 @@ from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
 
 from point_frustums.config_dataclasses.dataset import DatasetConfig
-from point_frustums.config_dataclasses.point_frustums import ModelOutputSpecification, TargetAssignment, Losses
+from point_frustums.config_dataclasses.point_frustums import (
+    ModelOutputSpecification,
+    TargetAssignment,
+    Losses,
+    Predictions,
+)
 from point_frustums.utils.geometry import (
     sph_to_cart_torch,
     cart_to_sph_torch,
@@ -20,6 +25,7 @@ from point_frustums.utils.geometry import (
     matrix_to_rotation_6d,
     iou_vol_3d,
 )
+from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
 from .base_models import Detection3DModel
@@ -43,6 +49,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         dataset: DatasetConfig,
         target_assignment: TargetAssignment,
         losses: Losses,
+        predictions: Predictions,
         **kwargs,
     ):
         super().__init__(*args, model=model, dataset=dataset, **kwargs)
@@ -52,6 +59,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.fpn_extra_layers = deepcopy(self.model.neck.fpn.extra_layers)
         self.target_assignment = target_assignment
         self.losses = losses
+        self.predictions = predictions
         # TODO: Add postprocessing step
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
@@ -249,7 +257,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         """
         center_pol_azi = self.feat_center_pol_azi
         if idx_feat is not None:
-            x = x[..., idx_feat, :]
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
         x[..., 1] *= self.discretization.delta_pol
@@ -262,9 +269,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return x.log()
 
     @staticmethod
-    def _decode_wlh(x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if idx_feat is not None:
-            x = x[..., idx_feat, :]
+    def _decode_wlh(x: torch.Tensor) -> torch.Tensor:
         return x.exp()
 
     def _encode_orientation(self, x: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -294,7 +299,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         """
         theta, phi = self.feature_vectors_angular_centers.unbind(dim=-1)
         if idx_feat is not None:
-            x = x[..., idx_feat, :]
             theta = theta[idx_feat]
             phi = phi[idx_feat]
         x = rotation_6d_to_matrix(x)
@@ -331,11 +335,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         """
         phi = self.feature_vectors_angular_centers[:, 1]
         if idx_feat is not None:
-            x = x[..., idx_feat, :]
             phi = phi[idx_feat]
 
         x = rotate_2d(phi=phi, x=x)
-        return x + ego_velocity
+        return x + ego_velocity[..., [0, 1]]
 
     def assign_target_index_to_features(
         self,
@@ -550,9 +553,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return {"velocity": velocity}
 
+    @staticmethod
+    def _flatten_output_channels_last(output: dict[str, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        # Flatten the last 2 dimensions of all predictions featuremaps, swap dimensions  and concatenate
+        output_flat = {}
+        for head, layers in output.items():
+            output_flat[head] = torch.cat([l.flatten(start_dim=2).transpose(-2, -1) for l in layers.values()], dim=-2)
+        return output_flat
+
     def get_losses(
         self,
-        predictions: dict[
+        output: dict[
             Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "vfl"], dict[str, torch.Tensor]
         ],
         targets: list[Targets],
@@ -561,14 +572,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         Literal["class", "attribute", "vfl", "center_radial", "center_angular", "wlh", "orientation", "velocity"],
         torch.Tensor,
     ]:
-        # Flatten the last 2 dimensions of all predictions featuremaps, swap dimensions  and concatenate
-        predictions = {
-            head: torch.cat([layer.flatten(start_dim=2).transpose(-2, -1) for layer in layers.values()], dim=-2)
-            for head, layers in predictions.items()
-        }
-        feat_center_decoded = sph_to_cart_torch(self._decode_center(predictions["center"]))
-        feat_wlh_decoded = self._decode_wlh(predictions["wlh"])
-        feat_orientation_decoded = self._decode_orientation(predictions["orientation"])
+        output = self._flatten_output_channels_last(output=output)
+        feat_center_decoded = sph_to_cart_torch(self._decode_center(output["center"]))
+        feat_wlh_decoded = self._decode_wlh(output["wlh"])
+        feat_orientation_decoded = self._decode_orientation(output["orientation"])
 
         feat_corners = get_corners_3d(
             centers=feat_center_decoded,
@@ -582,7 +589,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         targets_label = []
         targets_attribute = []
         targets_iou = []
-        for i in range(predictions["class"].shape[0]):
+        for i in range(output["class"].shape[0]):
             # Assign the index of a target/the background to each prediction
             with torch.no_grad():
                 target_labels = self._one_hot(targets[i].label, self.dataset.annotations.n_classes)
@@ -591,7 +598,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                     targets=targets[i],
                     target_labels=target_labels,
                     target_corners=target_corners,
-                    feat_labels=predictions["class"][i, ...],
+                    feat_labels=output["class"][i, ...],
                     feat_centers=feat_center_decoded[i, ...],
                     feat_corners=feat_corners[i, ...],
                 )
@@ -617,9 +624,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Evaluate the losses that are applied to the entire featuremap (class/attribute/IoU)
         losses = {
-            "class": sigmoid_focal_loss(predictions["class"], targets_label, reduction="sum"),
-            "attribute": sigmoid_focal_loss(predictions["attribute"], targets_attribute, reduction="sum"),
-            "vfl": vfl(predictions["vfl"], targets_iou, reduction="sum", **self.losses.vfl.kwargs),
+            "class": sigmoid_focal_loss(output["class"], targets_label, reduction="sum"),
+            "attribute": sigmoid_focal_loss(output["attribute"], targets_attribute, reduction="sum"),
+            "vfl": vfl(output["vfl"], targets_iou, reduction="sum", **self.losses.vfl.kwargs),
         }
 
         # Evaluate the losses that are applied only to the foreground (center/wlh/orientation/velocity)
@@ -627,7 +634,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the center coordinate
             losses.update(
                 self._loss_center(
-                    predictions_center_fg=predictions["center"][foreground],
+                    predictions_center_fg=output["center"][foreground],
                     foreground_idx=foreground_idx,
                     targets_center=[t.center for t in targets],
                     targets_indices_fg=targets_indices,
@@ -636,7 +643,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the size
             losses.update(
                 self._loss_wlh(
-                    predictions_wlh_fg=predictions["wlh"][foreground],
+                    predictions_wlh_fg=output["wlh"][foreground],
                     targets_wlh=[t.wlh for t in targets],
                     targets_indices_fg=targets_indices,
                 )
@@ -644,7 +651,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the orientation
             losses.update(
                 self._loss_orientation(
-                    predictions_orientation_fg=predictions["orientation"][foreground],
+                    predictions_orientation_fg=output["orientation"][foreground],
                     foreground_idx=foreground_idx,
                     targets_orientation=[t.orientation for t in targets],
                     targets_indices_fg=targets_indices,
@@ -653,7 +660,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the velocity
             losses.update(
                 self._loss_velocity(
-                    predictions_velocity_fg=predictions["velocity"][foreground],
+                    predictions_velocity_fg=output["velocity"][foreground],
                     ego_velocities=ego_velocities,
                     foreground_idx=foreground_idx,
                     targets_velocity=[t.velocity for t in targets],
@@ -675,10 +682,96 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 loss.append(loss_config.weight * val)
         return torch.stack(loss, dim=0).sum(dim=0)
 
+    def get_predictions(
+        self,
+        output: dict[
+            Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "vfl"], dict[str, torch.Tensor]
+        ],
+        ego_velocities: list[torch.Tensor],
+        sample_ids: list[str],
+    ):
+        output = self._flatten_output_channels_last(output=output)
+
+        score = torch.sigmoid(output["class"] + output["vfl"])
+
+        # Get the indices of outputs that surpass the confidence threshold:
+        # -> column 0: the sample index
+        # -> column 1: the featuremap index
+        # -> column 2: the class label index
+        indices = torch.ge(score, self.predictions.score_threshold).nonzero().unbind(-1)
+
+        # Subset the network outputs
+        output = {head: tensor[indices[0], indices[1], ...] for head, tensor in output.items()}
+
+        # Decode the box quantities
+        attribute = output["attribute"]
+        center = self._decode_center(output["center"], idx_feat=indices[1])
+        wlh = self._decode_wlh(output["wlh"])
+        orientation = self._decode_orientation(output["orientation"], idx_feat=indices[1])
+        # Broadcast the ego_velocities to match the subset of predictions
+        n_per_sample = [torch.eq(indices[0], i).count_nonzero() for i, _ in enumerate(ego_velocities)]
+        ego_velocity = torch.cat([v[None, :].repeat(n, 1) for v, n in zip(ego_velocities, n_per_sample)], dim=0)
+        velocity = self._decode_velocity(output["velocity"], ego_velocity=ego_velocity, idx_feat=indices[1])
+
+        # Subset and flatten the score, now corresponds to the columns of indices
+        score = score[indices]
+        batch_predictions = {}
+        for sample_idx, sample_id in enumerate(sample_ids):
+            batch_predictions[sample_id] = {}
+            # Process samples separately, since they will contain a different number of valid detections
+            sample_mask = torch.eq(indices[0], sample_idx)
+            sample_indices = sample_mask.nonzero().squeeze(dim=1)
+
+            # Subset sample output to the configured number of top predictions that should be considered for NMS
+            k = min(sample_indices.numel(), self.predictions.top_k)
+            sample_top_scores, sample_top_indices = score[sample_indices].topk(k=k)
+            sample_top_indices = sample_indices[sample_top_indices]
+
+            # Subset the sample subset by performing NMS and then selecting only the top duplicate-free detections
+            # Get the class labels (equivalent to the second column index) of the subset
+            class_label = indices[2][sample_top_indices]
+            # Subset and convert centers (to avoid re-computation)
+            sample_top_centers_cartesian = sph_to_cart_torch(center[sample_top_indices, ...])
+
+            # Perform 3D NMS
+            boxes = get_corners_3d(
+                centers=sample_top_centers_cartesian,
+                wlh=wlh[sample_top_indices, ...],
+                orientation=orientation[sample_top_indices, ...],
+            )
+            nms_keep_mask = nms_3d(
+                labels=class_label,
+                scores=sample_top_scores,
+                boxes=boxes,
+                iou_threshold=self.predictions.nms_threshold,
+            )
+            nms_keep_indices = nms_keep_mask.nonzero().squeeze(dim=1)
+            # Subset the duplicate-free outputs to the configured number of detections
+            k = min(nms_keep_mask.count_nonzero(), self.predictions.n_detections)
+            detections_top_scores, detections_top_indices = sample_top_scores[nms_keep_mask].topk(k)
+            detections_top_indices = nms_keep_indices[detections_top_indices]
+
+            # Subset the sample top indices to the actual detection indices
+            sample_detections_indices = sample_top_indices[detections_top_indices]
+
+            # The score already corresponds to the detections subset
+            batch_predictions[sample_id]["score"] = detections_top_scores
+            # The class and center are in the intermediate sample top subset format
+            batch_predictions[sample_id]["class"] = class_label[detections_top_indices]
+            batch_predictions[sample_id]["center"] = sample_top_centers_cartesian[detections_top_indices, ...]
+            # The remaining quantities are the subset of the network output that surpasses the initial score threshold
+            batch_predictions[sample_id]["attribute"] = attribute[sample_detections_indices, ...]
+            batch_predictions[sample_id]["wlh"] = wlh[sample_detections_indices, ...]
+            batch_predictions[sample_id]["orientation"] = orientation[sample_detections_indices, ...]
+            batch_predictions[sample_id]["velocity"] = velocity[sample_detections_indices, ...]
+
+        return batch_predictions
+
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
         ego_velocities = [torch.from_numpy(sample["velocity"]).to(self.device) for sample in batch["metadata"]]
-        losses = self.get_losses(predictions=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
+
+        losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
         loss = self.sum_losses(losses)
         for key, value in losses.items():
             self.log(f"Loss/{key}/train", value)
@@ -686,7 +779,19 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pass
+        batch_size = len(batch["metadata"])
+        output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
+        ego_velocities = [torch.from_numpy(sample["velocity"]).to(self.device) for sample in batch["metadata"]]
+
+        losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
+        loss = self.sum_losses(losses)
+        for key, value in losses.items():
+            self.log(f"Loss/{key}/val", value, batch_size=batch_size)
+        self.log("Loss/val", loss, batch_size=batch_size)
+
+        sample_ids = [sample["sample_token"] for sample in batch["metadata"]]
+        preds = self.get_predictions(output, ego_velocities, sample_ids)
+        return loss
 
     def test_step(self, batch, batch_idx):
         pass
