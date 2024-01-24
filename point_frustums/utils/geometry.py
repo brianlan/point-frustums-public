@@ -77,17 +77,7 @@ def rotate_2d(phi: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script
-def rotate_3d_spherical(theta: torch.Tensor, phi: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """
-    Rotates a sequence of 3D vectors by the angles from the spherical coordinate system theta and phi.
-    The algorithm is based on the conversion from spherical coordinates to quaternions and then performing
-    quaternion rotation.
-    :param theta:
-    :param phi:
-    :param x:
-    :return:
-    """
-
+def quaternion_from_spherical(phi: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
     scalar_phi = (phi / 2).sin()
     scalar_theta = (theta / 2).sin()
 
@@ -104,16 +94,110 @@ def rotate_3d_spherical(theta: torch.Tensor, phi: torch.Tensor, x: torch.Tensor)
         ],
         dim=-1,
     )
+    return q
+
+
+@torch.jit.script
+def apply_quaternion(q: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     q_0 = q[..., 0]
     q_vec = q[..., 1:]
 
     output = (q_0**2 - q_vec.square().sum(dim=-1))[..., None] * x
     output += 2 * torch.einsum("ij,ij->i", q_vec, x)[..., None] * q_vec
     output += 2 * q_0[..., None] * torch.linalg.cross(q_vec, x)  # pylint: disable=not-callable
-
     return output
 
 
+@torch.jit.script
+def rotate_3d_spherical(theta: torch.Tensor, phi: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """
+    Rotates a sequence of 3D vectors by the angles from the spherical coordinate system theta and phi.
+    The algorithm is based on the conversion from spherical coordinates to quaternions and then performing
+    quaternion rotation.
+    :param theta:
+    :param phi:
+    :param x:
+    :return:
+    """
+    q = quaternion_from_spherical(phi=phi, theta=theta)
+    return apply_quaternion(q=q, x=x)
+
+
+@torch.jit.script
+def quaternion_to_rotation_matrix(q: torch.Tensor, normalize: bool = False) -> torch.Tensor:
+    """
+    Batched conversion from quaternion to rotation matrix representation.
+    Solution to the eigenvalue problem: `m @ v.vec == q * v * q.conjugate()`.
+
+    :param q: The input quaternions [..., 4]
+    :param normalize: Boolean whether to normalize the input (not required if unit quaternions are passed)
+    :return:
+    """
+    batch_dim = q.shape[:-1]
+    if normalize:
+        q /= torch.linalg.vector_norm(q, dim=-1, keepdim=True)  # pylint: disable=not-callable
+    matrix = torch.stack(
+        [
+            1.0 - 2 * (q[..., 2] ** 2 + q[..., 3] ** 2),
+            2 * (q[..., 1] * q[..., 2] - q[..., 3] * q[..., 0]),
+            2 * (q[..., 1] * q[..., 3] + q[..., 2] * q[..., 0]),
+            2 * (q[..., 1] * q[..., 2] + q[..., 3] * q[..., 0]),
+            1.0 - 2 * (q[..., 1] ** 2 + q[..., 3] ** 2),
+            2 * (q[..., 2] * q[..., 3] - q[..., 1] * q[..., 0]),
+            2 * (q[..., 1] * q[..., 3] - q[..., 2] * q[..., 0]),
+            2 * (q[..., 2] * q[..., 3] + q[..., 1] * q[..., 0]),
+            1.0 - 2 * (q[..., 1] ** 2 + q[..., 2] ** 2),
+        ],
+        dim=-1,
+    )
+    return matrix.reshape(batch_dim + (3, 3))
+
+
+@torch.jit.script
+def rotation_matrix_to_quaternion(m: torch.Tensor) -> torch.Tensor:
+    """
+    Batched conversion from rotation matrix to quaternion representation.
+    Implements algorithm: https://d3cw3dd2w32x2b.cloudfront.net/wp-content/uploads/2015/01/matrix-to-quat.pdf as also
+    used by PyQuaternion.
+    Technically, the computational load could be reduced by a factor of 4, as each case is evaluated for all matrices
+    but in practice, splitting the input into four and evaluating the cases individually is slower after all.
+    :param m: The input matrices [..., 3, 3]
+    :return:
+    """
+    m = m.transpose(-1, -2)
+    batch_dim = m.shape[:-2]
+    m00, m01, m02, m10, m11, m12, m20, m21, m22 = torch.unbind(m.reshape(batch_dim + (9,)), dim=-1)
+
+    case_outer = torch.lt(m22, 0)
+    case_inner_1 = torch.gt(m00, m11)
+    case_inner_2 = torch.lt(m00, -m11)
+
+    case_1 = (case_outer * case_inner_1).unsqueeze(-1)
+    case_2 = (case_outer * (~case_inner_1)).unsqueeze(-1)
+    case_3 = ((~case_outer) * case_inner_2).unsqueeze(-1)
+    case_4 = ((~case_outer) * (~case_inner_2)).unsqueeze(-1)
+
+    case_1_t = 1 + m00 - m11 - m22
+    case_1_value = torch.stack([m12 - m21, case_1_t, m01 + m10, m20 + m02], dim=-1)
+    case_2_t = 1 - m00 + m11 - m22
+    case_2_value = torch.stack([m20 - m02, m01 + m10, case_2_t, m12 + m21], dim=-1)
+    case_3_t = 1 - m00 - m11 + m22
+    case_3_value = torch.stack([m01 - m10, m20 + m02, m12 + m21, case_3_t], dim=-1)
+    case_4_t = 1 + m00 + m11 + m22
+    case_4_value = torch.stack([case_4_t, m12 - m21, m20 - m02, m01 - m10], dim=-1)
+
+    q = case_1 * case_1_value + case_2 * case_2_value + case_3 * case_3_value + case_4 * case_4_value
+
+    case_1_t = case_1_t.unsqueeze(-1)
+    case_2_t = case_2_t.unsqueeze(-1)
+    case_3_t = case_3_t.unsqueeze(-1)
+    case_4_t = case_4_t.unsqueeze(-1)
+
+    q *= 0.5 / torch.sqrt(case_1 * case_1_t + case_2 * case_2_t + case_3 * case_3_t + case_4 * case_4_t)
+    return q
+
+
+@torch.jit.script
 def rotation_matrix_from_spherical(theta: torch.Tensor, phi: torch.Tensor) -> torch.Tensor:
     """
     Create a rotation matrix from the euler angles specified as theta and phi in the ZYX convention.
