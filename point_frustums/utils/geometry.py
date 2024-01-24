@@ -98,14 +98,40 @@ def quaternion_from_spherical(phi: torch.Tensor, theta: torch.Tensor) -> torch.T
 
 
 @torch.jit.script
-def apply_quaternion(q: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    q_0 = q[..., 0]
-    q_vec = q[..., 1:]
-
-    output = (q_0**2 - q_vec.square().sum(dim=-1))[..., None] * x
-    output += 2 * torch.einsum("ij,ij->i", q_vec, x)[..., None] * q_vec
-    output += 2 * q_0[..., None] * torch.linalg.cross(q_vec, x)  # pylint: disable=not-callable
+def apply_quaternion_to_vector(q: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """
+    Apply the quaternion(s) to the batch of vectors. The computation is either conducted pairwise
+    (x.shape[0] == q.shape[0] == N) or by broadcasting q to x (q.shape == [1, 4], x.shape == [N, 3]).
+    :param q:
+    :param x:
+    :return:
+    """
+    q_re, q_im = q.split([1, 3], dim=-1)
+    output = (q_re**2 - q_im.square().sum(dim=-1)[..., None]) * x
+    output += 2 * torch.einsum("ij,ij->i", q_im, x)[..., None] * q_im
+    output += 2 * q_re * torch.linalg.cross(q_im, x)  # pylint: disable=not-callable
     return output
+
+
+@torch.jit.script
+def apply_quaternion_to_quaternion(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+    """
+    Apply q1 from the left to q2. The computation is either conducted pairwise (q1.shape == q2.shape == [N, 4]) or by
+    broadcasting q1 to q2 (q1.shape == [1, 4], q2.shape == [N, 4]). The algorithm implements equation (1) from [1].
+
+    [1]: https://graphics.stanford.edu/courses/cs348a-17-winter/Papers/quaternion.pdf
+    :param q1: The quaternion(s) to apply
+    :param q2: The quaternions that shall be transformed
+    :return: The transformed quaternions
+    """
+    assert q1.dim() == q2.dim()
+    q1_re, q1_im = q1.split([1, 3], dim=-1)
+    q2_re, q2_im = q2.split([1, 3], dim=-1)
+    q_out = torch.zeros_like(q2)
+    q_out[..., 0] = (q1_re * q2_re).squeeze() - torch.einsum("...i,...i->...", q1_im, q2_im)
+    q_out[..., 1:] += q1_re * q2_im + q2_re * q1_im
+    q_out[..., 1:] += torch.linalg.cross(q1_im, q2_im, dim=-1)  # pylint: disable=not-callable
+    return q_out
 
 
 @torch.jit.script
@@ -120,7 +146,7 @@ def rotate_3d_spherical(theta: torch.Tensor, phi: torch.Tensor, x: torch.Tensor)
     :return:
     """
     q = quaternion_from_spherical(phi=phi, theta=theta)
-    return apply_quaternion(q=q, x=x)
+    return apply_quaternion_to_vector(q=q, x=x)
 
 
 @torch.jit.script
