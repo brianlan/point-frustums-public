@@ -113,6 +113,13 @@ def apply_quaternion_to_vector(q: torch.Tensor, x: torch.Tensor) -> torch.Tensor
     return output
 
 
+def apply_quaternion_to_2d_vector(q: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    batch_dim = x.shape[:-1]
+    zeros = x.new_zeros(batch_dim + (1,))
+    x = torch.cat((x, zeros), dim=-1)
+    return apply_quaternion_to_vector(q=q, x=x)[..., :2]
+
+
 @torch.jit.script
 def apply_quaternion_to_quaternion(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """
