@@ -58,6 +58,26 @@ class Annotations:
                 return self.classes.from_name(class_alias)
         return None
 
+    def resolve_attribute(self, attribute: str, class_alias: str) -> str:
+        """
+        Resolve the short-form attribute to the verbose form. Check first, if the predicted attribute is at all valid
+        for the predicted class, if it is not, replace with the category default.
+        :param attribute: The short-form attribute {moving, standing, sitting_lying_down, parked, stopped, void, ...}
+        :param class_alias:
+        :return: The resolved, verbose attribute name
+        """
+        category = self.alias_to_category[class_alias]
+        attribute_choices = self.category_to_attributes[category]
+        if attribute not in attribute_choices:
+            attribute = attribute_choices[0]
+
+        if attribute == "void":
+            attribute = ""
+        else:
+            attribute = f"{category}.{attribute}"
+
+        return attribute
+
 
 @dataclass(slots=True, frozen=True)
 class Sensor:
