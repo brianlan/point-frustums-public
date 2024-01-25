@@ -60,18 +60,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.target_assignment = target_assignment
         self.losses = losses
         self.predictions = predictions
-        # TODO: Add postprocessing step
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
     def configure_model(self) -> None:
         self.setup_logger()
 
     def setup_logger(self):
-        if isinstance(self.logger.experiment, torch.utils.tensorboard.SummaryWriter):
+        if isinstance(self.logger.experiment, torch.utils.tensorboard.SummaryWriter):  # NOQA
             losses = {
                 "Losses": {f"Loss/{l}": ["Multiline", [f"Loss/{l}/train", f"Loss/{l}/val"]] for l in self.losses.losses}
             }
-            self.logger.experiment.add_custom_scalars(losses)
+            self.logger.experiment.add_custom_scalars(losses)  # NOQA
 
     def evaluate_receptive_fields(self) -> tuple[dict[str, float], dict[str, float]]:
         def get_rf(k: list, s: list) -> int:
@@ -692,17 +691,24 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 loss.append(loss_config.weight * val)
         return torch.stack(loss, dim=0).sum(dim=0)
 
-    def get_predictions(
+    def get_detections(
         self,
         output: dict[
             Literal["class", "attribute", "center", "wlh", "orientation", "velocity", "vfl"], dict[str, torch.Tensor]
         ],
         ego_velocities: list[torch.Tensor],
-        sample_ids: list[str],
-    ):
+    ) -> list[dict[Literal["score", "class", "attribute", "center", "wlh", "orientation", "velocity"], torch.Tensor]]:
+        """
+        Select confident outputs are detections and transform to the coordinate system of the training targets.
+        :param output:
+        :param ego_velocities:
+        :param sample_ids:
+        :return:
+        """
         output = self._flatten_output_channels_last(output=output)
 
         score = torch.sigmoid(output["class"] + output["vfl"])
+        batch_size = score.shape[0]
 
         # Get the indices of outputs that surpass the confidence threshold:
         # -> column 0: the sample index
@@ -725,9 +731,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Subset and flatten the score, now corresponds to the columns of indices
         score = score[indices]
-        batch_predictions = {}
-        for sample_idx, sample_id in enumerate(sample_ids):
-            batch_predictions[sample_id] = {}
+        batch_detections = []
+        for sample_idx in range(batch_size):
+            sample_detections = {}
             # Process samples separately, since they will contain a different number of valid detections
             sample_mask = torch.eq(indices[0], sample_idx)
             sample_indices = sample_mask.nonzero().squeeze(dim=1)
@@ -765,17 +771,19 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             sample_detections_indices = sample_top_indices[detections_top_indices]
 
             # The score already corresponds to the detections subset
-            batch_predictions[sample_id]["score"] = detections_top_scores
+            sample_detections["score"] = detections_top_scores
             # The class and center are in the intermediate sample top subset format
-            batch_predictions[sample_id]["class"] = class_label[detections_top_indices]
-            batch_predictions[sample_id]["center"] = sample_top_centers_cartesian[detections_top_indices, ...]
+            sample_detections["class"] = class_label[detections_top_indices]
+            sample_detections["center"] = sample_top_centers_cartesian[detections_top_indices, ...]
             # The remaining quantities are the subset of the network output that surpasses the initial score threshold
-            batch_predictions[sample_id]["attribute"] = attribute[sample_detections_indices, ...]
-            batch_predictions[sample_id]["wlh"] = wlh[sample_detections_indices, ...]
-            batch_predictions[sample_id]["orientation"] = orientation[sample_detections_indices, ...]
-            batch_predictions[sample_id]["velocity"] = velocity[sample_detections_indices, ...]
+            sample_detections["attribute"] = attribute[sample_detections_indices, ...].max(dim=-1).indices
+            sample_detections["wlh"] = wlh[sample_detections_indices, ...]
+            sample_detections["orientation"] = orientation[sample_detections_indices, ...]
+            sample_detections["velocity"] = velocity[sample_detections_indices, ...]
 
-        return batch_predictions
+            batch_detections.append(sample_detections)
+
+        return batch_detections  # NOQA: Cannot infer return type Tensor in the above lines
 
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
@@ -799,8 +807,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             self.log(f"Loss/{key}/val", value, batch_size=batch_size)
         self.log("Loss/val", loss, batch_size=batch_size)
 
-        sample_ids = [sample["sample_token"] for sample in batch["metadata"]]
-        preds = self.get_predictions(output, ego_velocities, sample_ids)
+        detections = self.get_detections(output, ego_velocities)
+
         return loss
 
     def test_step(self, batch, batch_idx):

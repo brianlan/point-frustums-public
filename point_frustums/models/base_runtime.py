@@ -17,7 +17,7 @@ class Detection3DRuntime(LightningModule, metaclass=ABCMeta):
 
     def forward(  # pylint: disable=arguments-differ
         self,
-        lidar: Optional[MutableMapping[str, Tensor]],
+        lidar: dict[str, list[Tensor]],
         camera: Optional[MutableMapping[str, Tensor]],
         radar: Optional[MutableMapping[str, Tensor]],
     ):
