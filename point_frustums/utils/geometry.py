@@ -61,6 +61,59 @@ def sph_to_cart_torch(points: torch.Tensor) -> torch.Tensor:
     return points_cart
 
 
+def random_quaternions(n: int, device="cpu") -> torch.Tensor:
+    """
+    Generate `n` random quaternions.
+    :param n:
+    :param device:
+    :return:
+    """
+    random_unit_vectors = torch.nn.functional.normalize(torch.rand((n, 3), device=device), dim=-1)
+    random_angles = torch.pi * torch.rand((n, 1), device=device) - (torch.pi / 2)
+    return torch.cat((random_angles.cos(), random_angles.sin() * random_unit_vectors), dim=-1)
+
+
+def quaternion_invert(q: torch.Tensor) -> torch.Tensor:
+    """
+    Invert the provided batch of quaternions.
+    :param q:
+    :return:
+    """
+    scaling = q.new_tensor([1, -1, -1, -1])
+    return q * scaling
+
+
+@torch.jit.script
+def levi_civita_symbol(device: str = "cpu") -> torch.Tensor:
+    """
+    Construct the Levi-Civita symbol which can be used to represent the cross product (`a x b = -a . levi . b`)
+    among others.
+    :param device:
+    :return:
+    """
+    levi = torch.zeros((3, 3, 3), device=device)
+    # Set even permutations to 1
+    levi[[0, 1, 2], [1, 2, 0], [2, 0, 1]] = 1
+    # Set uneven permutations to -1
+    levi[[2, 1, 0], [1, 0, 2], [0, 2, 1]] = -1
+    return levi
+
+
+def random_rotation_matrices(n: int, device="cpu") -> torch.Tensor:
+    """
+    Use the Rodrigues-formula [1] to construct `n` random rotation matrices.
+    [1]: Q(d, theta) = I + sin(theta) D + (1-cos(theta))D^2  with D = -d @ levi and D^2 = D @ D
+    :param n:
+    :param device:
+    :return:
+    """
+    random_axis = torch.nn.functional.normalize(torch.rand((n, 3), device=device), dim=-1)
+    random_angles = 2 * torch.pi * torch.rand((n, 1, 1), device=device)
+    dyad = -torch.einsum("ij,jkl->ikl", random_axis, levi_civita_symbol(device=device))
+    dyad_square = torch.einsum("ijk,ikl->ijl", dyad, dyad)
+    return torch.eye(3, device=device)[None, ...] + random_angles.sin() * dyad + (1 - random_angles.cos()) * dyad_square
+
+
 @torch.jit.script
 def rotate_2d(phi: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """
