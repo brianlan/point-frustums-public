@@ -14,16 +14,13 @@ from point_frustums.config_dataclasses.point_frustums import (
     Losses,
     Predictions,
 )
-from point_frustums.utils.geometry import (
-    sph_to_cart_torch,
-    cart_to_sph_torch,
-    get_corners_3d,
-    get_spherical_projection_boundaries,
-    rotate_2d,
-    rotation_matrix_from_spherical,
-    rotation_6d_to_matrix,
-    matrix_to_rotation_6d,
-    iou_vol_3d,
+from point_frustums.geometry.coordinate_system_conversion import sph_to_cart_torch, cart_to_sph_torch
+from point_frustums.geometry.utils import get_corners_3d, get_spherical_projection_boundaries, iou_vol_3d
+from point_frustums.geometry.quaternion import rotate_2d
+from point_frustums.geometry.rotation_matrix import (
+    rotation_matrix_from_spherical_coordinates,
+    rotation_matrix_to_rotation_6d,
+    rotation_matrix_from_rotation_6d,
 )
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.targets import Targets
@@ -294,9 +291,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             theta = theta[idx_feat]
             phi = phi[idx_feat]
         # Transpose along the last 2 dimensions to invert the direction of rotation
-        rotation_matrices = rotation_matrix_from_spherical(theta, phi).transpose(-1, -2)
+        rotation_matrices = rotation_matrix_from_spherical_coordinates(theta, phi).transpose(-1, -2)
         x = torch.einsum("...ij,...jk->...ik", rotation_matrices, x)
-        return matrix_to_rotation_6d(x)
+        return rotation_matrix_to_rotation_6d(x)
 
     def _decode_orientation(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -310,8 +307,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if idx_feat is not None:
             theta = theta[idx_feat]
             phi = phi[idx_feat]
-        x = rotation_6d_to_matrix(x)
-        rotation_matrices = rotation_matrix_from_spherical(theta, phi)
+        x = rotation_matrix_from_rotation_6d(x)
+        rotation_matrices = rotation_matrix_from_spherical_coordinates(theta, phi)
         return torch.einsum("...ij,...jk->...ik", rotation_matrices, x)
 
     def _encode_velocity(

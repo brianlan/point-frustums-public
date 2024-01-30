@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 
 from point_frustums.ops.rotation_conversions import matrix_to_euler_angles, euler_angles_to_matrix
-from point_frustums.utils.geometry import angle_to_neg_pi_to_pi
+from point_frustums.geometry.utils import angle_to_neg_pi_to_pi
 from point_frustums.utils.targets import Targets
 from .augmentations import RandomAugmentation
 
@@ -45,6 +45,7 @@ class RandomFlipHorizontal(RandomAugmentation):
         targets_euler = matrix_to_euler_angles(targets.orientation, convention="XYZ")
         #   2. Flip the r_x and r_z angles (the rotations corresponding to both axis other than the flipped one)
         assert self.flip_axis == "y", f"It appears as if {self.flip_axis=} has been changed but change was missed here."
+        # TODO: Get rid of the euler angles representation and then drop the rotation_conversions.py file
         targets_euler[:, [0, 2]] = -targets_euler[:, [0, 2]]
         #   3. Convert back to the matrix form
         targets.orientation[...] = euler_angles_to_matrix(targets_euler, convention="XYZ")

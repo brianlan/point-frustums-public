@@ -22,7 +22,7 @@ from point_frustums import ROOT_DIR
 from point_frustums.augmentations import Augmentation, RandomAugmentation
 from point_frustums.config_dataclasses.dataset import DatasetConfig, Sensor
 from point_frustums.utils.environment_helpers import data_root_getter
-from point_frustums.utils.geometry import cart_to_sph_numpy
+from point_frustums.geometry.utils import cart_to_sph_numpy
 from point_frustums.utils.targets import Targets
 
 VISIBILITY_LEVELS = {

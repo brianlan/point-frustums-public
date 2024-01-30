@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from point_frustums.utils import geometry
+from point_frustums.geometry.utils import deg_to_rad
 
 
 @dataclass(slots=True, frozen=False)
@@ -79,11 +79,11 @@ class ConfigDiscretize:
 
     @property
     def fov_azi(self):
-        return tuple(geometry.deg_to_rad(x) for x in self.fov_azi_deg)
+        return tuple(deg_to_rad(x) for x in self.fov_azi_deg)
 
     @property
     def fov_pol(self):
-        return tuple(geometry.deg_to_rad(x) for x in self.fov_pol_deg)
+        return tuple(deg_to_rad(x) for x in self.fov_pol_deg)
 
     @property
     def range_pol(self):

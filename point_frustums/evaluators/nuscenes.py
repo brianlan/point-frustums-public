@@ -11,11 +11,12 @@ from prettytable import PrettyTable
 from point_frustums import ROOT_DIR
 from point_frustums.config_dataclasses.dataset import DatasetConfig
 from point_frustums.utils.environment_helpers import data_root_getter
-from point_frustums.utils.geometry import (
+
+from point_frustums.geometry.quaternion import (
     apply_quaternion_to_vector,
     apply_quaternion_to_2d_vector,
     apply_quaternion_to_quaternion,
-    rotation_matrix_to_quaternion,
+    quaternion_from_rotation_matrix,
 )
 from .base_evaluator import Evaluator
 
@@ -53,7 +54,7 @@ class NuScenesEvaluator(Evaluator):
             attribute_label = sample_detections["attribute"]
             center = sample_detections["center"]
             wlh = sample_detections["wlh"].clamp(min=1e-8)
-            orientation = rotation_matrix_to_quaternion(sample_detections["orientation"])
+            orientation = quaternion_from_rotation_matrix(sample_detections["orientation"])
             velocity = sample_detections["velocity"]
 
             # If COOS in which training targets were provided is not of the EGO (e.g. LIDAR_TOP)
