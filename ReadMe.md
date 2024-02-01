@@ -20,11 +20,17 @@ For development or contribution, it is recommended to install the project in edi
   pip install -e ".[dev]"
 ```
 
+### Requirements
+
+
 ## Basic Structure
 The migrated code fully integrates with PyTorch Lightning. Core components are briefly described below.
 
 ### NuScenes Dataloader
-A PyTorch `Dataset` that internally uses the API provided by the `nuscenes-devkit` [2].
+A PyTorch `Dataset` that internally uses the API provided by the `nuscenes-devkit` [2]. 
+The NuScenes dataloader requires the NuScenes dataset as well as the CAN bus data to be downloaded and unpacked as documented by the `nuscenes-devkit` [2]. You can either specify `--data.data_root=<NUSCENES/ROOT/DIR>` or wait to be prompted the first time you invoke a training. The data_root will be cached locally for the specific dataset and version for subsequent use.
+The implemented dataset can be configured to `load_velocity` (optionally with `load_can`) to provide EGO velocities for training and inference. 
+
 <details>
 <summary>Format of loaded samples</summary>
 ```
@@ -91,7 +97,9 @@ which are decoupled but conveniently grouped in a `LightningModule`.
 -[ ] Add output encoding to the documentation
 -[ ] Finalize `torchmetrics` implementation of the NDS
 -[ ] Implement CUDA kernel for 3D NMS
+-[ ] Migrate remaining augmentations
 -[ ] Provide results
+-[ ] Support loading data and targets in EGO COOS
 -[ ] Implement Camera to LiDAR fusion 
 -[ ] Implement PointPillars and FCOS-LiDAR in the framework
 

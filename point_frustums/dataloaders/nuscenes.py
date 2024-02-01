@@ -1,4 +1,3 @@
-import os
 from collections.abc import Mapping, MutableMapping, Sequence
 from functools import lru_cache, cached_property
 from functools import partial
@@ -137,7 +136,7 @@ class NuScenes(Dataset):
 
     @cached_property
     def can_bus_api(self) -> NuScenesCanBus:
-        return NuScenesCanBus(dataroot=os.path.dirname(self.db.dataroot))
+        return NuScenesCanBus(dataroot=self.db.dataroot)
 
     @cached_property
     def sample_tokens(self):
@@ -460,8 +459,7 @@ class NuScenes(Dataset):
             # All loaded sweeps that are not the reference sweep are transformed into the reference sweep frame.
             if ref_sample_data_token != sample_data_token:
                 sensor2global = self.get_sensor_to_global(sample_data)
-                # Fuse four transformations: (current) sensor2ego -> ego2global -> global2ego -> ego2sensor (reference)
-                #   and apply the transformation
+                # Apply fused transformation: (current) sensor2ego -> ego2global -> global2ego -> ego2sensor (reference)
                 pc.transform(np.dot(global2sensor, sensor2global))
 
             # Extract the points array (4, N) from the data class
@@ -473,7 +471,7 @@ class NuScenes(Dataset):
 
             sweeps.append(pc.astype(np.float32))
 
-            # Evaluate whether to break or resume loading
+            # Evaluate whether a previous sweep in the current scene exists
             if sample_data["prev"] == "":
                 break
 
