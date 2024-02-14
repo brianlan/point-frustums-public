@@ -17,6 +17,8 @@ from ..functional.nds import (
     _calc_tp_err_translation,
     _nds_update_assign_target,
     _nds_compute_merge_tp_and_fp,
+    _nds_compute_interpolate_recall_precision_score,
+    _nds_compute_calculate_ap,
 )
 
 
@@ -151,5 +153,18 @@ class NuScenesDetectionScore(Metric):
                 interpolated_metrics[i_thresh][i_cls] = {}
                 interpolated_metrics_mean[i_thresh][i_cls] = {}
                 tp, fp, score, tp_subset_sort_idx = _nds_compute_merge_tp_and_fp(
-                    tp_class, tp_score, fp_class, fp_score, i_cls
+                    tp_class=tp_class, tp_score=tp_score, fp_class=fp_class, fp_score=fp_score, i_cls=i_cls
+                )
+
+                # Interpolate the precision and the score to the recall
+                interpolated_metrics[i_thresh][i_cls] = _nds_compute_interpolate_recall_precision_score(
+                    tp, fp, n_targets=self.n_targets(i_cls), score=score, n_points=self.n_points_interpolation
+                )
+
+                # Average the interpolated metrics
+                interpolated_metrics_mean[i_thresh][i_cls]["AP"] = _nds_compute_calculate_ap(
+                    precision=interpolated_metrics[i_thresh][i_cls]["precision"],
+                    min_recall=self.min_recall,
+                    min_precision=self.min_precision,
+                    n_bins=self.n_points_interpolation,
                 )

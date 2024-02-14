@@ -3,6 +3,7 @@ from math import inf
 import torch
 from point_frustums.geometry.rotation_matrix import rotation_matrix_to_yaw
 from point_frustums.geometry.utils import angle_to_neg_pi_to_pi
+from point_frustums.functional import interpolate_to_support
 
 
 def _calc_tp_err_translation(detections: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -150,3 +151,47 @@ def _nds_compute_merge_tp_and_fp(
     tp = torch.cat((torch.ones_like(tp_score_subset), torch.zeros_like(fp_score_subset)))[merged_sort_idx].cumsum(dim=0)
     fp = torch.cat((torch.zeros_like(tp_score_subset), torch.ones_like(fp_score_subset)))[merged_sort_idx].cumsum(dim=0)
     return tp, fp, merged_score, tp_subset_sort_index
+
+
+def _nds_compute_interpolate_recall_precision_score(
+    true_positive: torch.Tensor,
+    false_positive: torch.Tensor,
+    n_targets: torch.Tensor,
+    score: torch.Tensor,
+    n_points: int,
+):
+    """
+    Interpolate precision and score to the recall in the range [0, 1].
+    :param true_positive:
+    :param false_positive:
+    :param n_targets:
+    :param score:
+    :param n_points:
+    :return:
+    """
+    recall_support = torch.linspace(0, 1, n_points, device=true_positive.device)
+
+    # Calculate precision and recall w.r.t. the number of predictions and seen targets
+    precision = true_positive / (false_positive + true_positive)
+    recall = true_positive / n_targets.clamp(min=1e-8)
+
+    # Interpolate precision and recall for the specified number of recall points (default=101)
+    interpolated_metrics = {
+        "recall": recall_support,
+        "precision": interpolate_to_support(x=recall, y=precision, support=recall_support, right=0),
+        "score": interpolate_to_support(x=recall, y=score, support=recall_support, right=0),
+    }
+    return interpolated_metrics
+
+
+def _nds_compute_calculate_ap(precision: torch.Tensor, min_recall: float, min_precision: float, n_bins: int) -> float:
+    """
+    Calculate the average precision as done by NuScenes. The paper states: '...the area under the precision recall
+    curve  for recall and precision over 10%. Operating points where recall or precision is less than 10% are
+    removed...'
+    :param precision: The interpolated precision.
+    :return:
+    """
+    min_recall_bin_index = round(min_recall * (n_bins - 1))
+    normalization_factor = 1 - min_precision
+    return (precision[min_recall_bin_index + 1 :] - min_precision).clamp(min=0).mean() / normalization_factor
