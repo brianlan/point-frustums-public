@@ -61,3 +61,22 @@ def _calc_tp_err_attribute(detections: torch.Tensor, targets: torch.Tensor) -> t
     # TODO: Set void targets to NaN to exclude from the score
     # TODO: Resolve ambiguity before comparing
     return 1 - torch.eq(detections, targets).float()
+
+
+def _nds_update_target_count(targets: torch.Tensor) -> tuple[list[int], list[int]]:
+    """
+    Get the number of targets per class in the provided sample.
+    :param targets:
+    :return: tuple[cls_index, cls_count]
+    """
+    cls_index, cls_count = targets.unique(return_counts=True)
+    return cls_index.tolist(), cls_count.tolist()
+
+
+def _nds_update_distance_function(detections: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    distance = detections[:, None, ..., :2] - targets[None, ..., :2]
+    return torch.linalg.vector_norm(distance, dim=-1)  # pylint: disable=not-callable
+
+
+def _nds_update_class_match_function(detections: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    return torch.eq(detections[:, None, ...], targets[None, ...])

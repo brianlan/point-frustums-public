@@ -84,6 +84,7 @@ setup(
     package_data={PROJECT: ["*.dll", "*.dylib", "*.so", "**/*.so"]},
     install_requires=[
         "pytorch-lightning[extra]",
+        "torchmetrics",
         "nuscenes-devkit>=1.1.10",
         "numpy>=1.24.2",
         "torch>=2.1.0",
