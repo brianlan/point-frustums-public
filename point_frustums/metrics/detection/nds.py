@@ -9,10 +9,23 @@ from ..functional.nds import (
     _nds_update_distance_function,
     _nds_update_class_match_function,
     _nds_update_target_count,
+    _calc_tp_err_attribute,
+    _calc_tp_err_velocity,
+    _calc_tp_err_orientation,
+    _calc_tp_err_scale,
+    _calc_tp_err_translation,
 )
 
 
 class NuScenesDetectionScore(Metric):
+    tp_metrics_specification = {
+        "translation": {"err_fn": _calc_tp_err_translation, "attribute": "center", "id": "ATE"},
+        "scale": {"err_fn": _calc_tp_err_scale, "attribute": "wlh", "id": "ASE"},
+        "orientation": {"err_fn": _calc_tp_err_orientation, "attribute": "orientation", "id": "AOE"},
+        "velocity": {"err_fn": _calc_tp_err_velocity, "attribute": "velocity", "id": "AVE"},
+        "attribute": {"err_fn": _calc_tp_err_attribute, "attribute": "attribute", "id": "AAE"},
+    }
+
     def __init__(
         self,
         annotations: Annotations,
@@ -51,6 +64,9 @@ class NuScenesDetectionScore(Metric):
             self.add_state(f"tp_class_t{threshold}", default=[], dist_reduce_fx=None)
             self.add_state(f"fp_score_t{threshold}", default=[], dist_reduce_fx=None)
             self.add_state(f"fp_class_t{threshold}", default=[], dist_reduce_fx=None)
+            # Register states applied to TP detections (error metrics)
+            for metric in self.tp_metrics_specification:
+                self.add_state(f"tp_err_{metric}_t{threshold}", default=[], dist_reduce_fx=None)
 
     def n_targets(self, i: int) -> torch.Tensor:
         return getattr(self, f"n_targets_{i}")
