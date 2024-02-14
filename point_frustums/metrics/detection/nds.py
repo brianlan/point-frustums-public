@@ -119,6 +119,15 @@ class NuScenesDetectionScore(Metric):
                 # Append the true positive state
                 self._append_list_state(reference="tp_class", threshold=i, data=detections["class"][mask_tp])
                 self._append_list_state(reference="tp_score", threshold=i, data=detections["score"][mask_tp])
+                # Append the true positive metrics
+                for metric, specification in self.tp_metrics_specification.items():
+                    err_fn = specification["err_fn"]
+                    attribute_name = specification["attribute"]
+                    self._append_list_state(
+                        reference=f"tp_err_{metric}",
+                        threshold=i,
+                        data=err_fn(detections[attribute_name][mask_tp], targets[attribute_name][target_idx]),
+                    )
 
     def compute(self, output_file: Optional[str] = None) -> Any:
         raise NotImplementedError
