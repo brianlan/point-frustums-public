@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 import torch
 from torchmetrics import Metric
+from torchmetrics.utilities import dim_zero_cat
 
 from point_frustums.config_dataclasses.dataset import Annotations
 from ..functional.nds import (
@@ -15,6 +16,7 @@ from ..functional.nds import (
     _calc_tp_err_scale,
     _calc_tp_err_translation,
     _nds_update_assign_target,
+    _nds_compute_merge_tp_and_fp,
 )
 
 
@@ -129,5 +131,25 @@ class NuScenesDetectionScore(Metric):
                         data=err_fn(detections[attribute_name][mask_tp], targets[attribute_name][target_idx]),
                     )
 
+    def _get_cat_state(self, state):
+        return dim_zero_cat(getattr(self, state))
+
     def compute(self, output_file: Optional[str] = None) -> Any:
-        raise NotImplementedError
+        interpolated_metrics = {}
+        interpolated_metrics_mean = {}
+
+        for i_thresh, d in enumerate(self.distance_thresholds):
+            interpolated_metrics[i_thresh] = {}
+            interpolated_metrics_mean[i_thresh] = {}
+
+            tp_score = self._get_cat_state(f"tp_score_t{i_thresh}")
+            tp_class = self._get_cat_state(f"tp_class_t{i_thresh}")
+            fp_score = self._get_cat_state(f"fp_score_t{i_thresh}")
+            fp_class = self._get_cat_state(f"fp_class_t{i_thresh}")
+
+            for i_cls in range(self.n_classes):
+                interpolated_metrics[i_thresh][i_cls] = {}
+                interpolated_metrics_mean[i_thresh][i_cls] = {}
+                tp, fp, score, tp_subset_sort_idx = _nds_compute_merge_tp_and_fp(
+                    tp_class, tp_score, fp_class, fp_score, i_cls
+                )

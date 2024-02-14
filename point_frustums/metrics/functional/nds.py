@@ -117,3 +117,36 @@ def _nds_update_assign_target(
     matches_distances = _resolve_ambiguous_matches(matches_distances, score)
     distance, index = matches_distances.min(dim=-1)
     return distance, index
+
+
+def _nds_compute_merge_tp_and_fp(
+    tp_class: torch.Tensor, tp_score: torch.Tensor, fp_class: torch.Tensor, fp_score: torch.Tensor, i_cls: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    From the provided tp and fp arrays, compute the cumulative sum representation that is used to calculate precision
+    and recall. Get also the corresponding merged score (TP + FP) and the index that retrieves the sorted subset for
+    the class index.
+    :param tp_class:
+    :param tp_score:
+    :param fp_class:
+    :param fp_score:
+    :param i_cls:
+    :return:
+    """
+    mask_tp_subset_cls = torch.eq(tp_class, i_cls)
+    mask_fp_subset_cls = torch.eq(fp_class, i_cls)
+
+    # Subset all states to the class
+    tp_score_subset = tp_score[mask_tp_subset_cls]
+    fp_score_subset = fp_score[mask_fp_subset_cls]
+
+    # Sort all TP states by decreasing score and construct the subset and sort index
+    tp_score_subset, tp_sort_index = tp_score_subset.sort(descending=True)
+    tp_subset_sort_index = mask_tp_subset_cls.nonzero().squeeze(1)[tp_sort_index]
+
+    # Merge TP and FP score and get the descending-sorted version together with the sort index
+    merged_score, merged_sort_idx = torch.cat((tp_score_subset, fp_score_subset), dim=0).sort(descending=True)
+    # Create, sort and accumulate TP and FP count
+    tp = torch.cat((torch.ones_like(tp_score_subset), torch.zeros_like(fp_score_subset)))[merged_sort_idx].cumsum(dim=0)
+    fp = torch.cat((torch.zeros_like(tp_score_subset), torch.ones_like(fp_score_subset)))[merged_sort_idx].cumsum(dim=0)
+    return tp, fp, merged_score, tp_subset_sort_index
