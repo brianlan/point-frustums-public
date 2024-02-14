@@ -1,3 +1,5 @@
+from math import inf
+
 import torch
 from point_frustums.geometry.rotation_matrix import rotation_matrix_to_yaw
 from point_frustums.geometry.utils import angle_to_neg_pi_to_pi
@@ -80,3 +82,38 @@ def _nds_update_distance_function(detections: torch.Tensor, targets: torch.Tenso
 
 def _nds_update_class_match_function(detections: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     return torch.eq(detections[:, None, ...], targets[None, ...])
+
+
+def _resolve_ambiguous_matches(matches_distances: torch.Tensor, score: torch.Tensor) -> torch.Tensor:
+    """
+    This implements a strategy to resolve ambiguities where a target is matched by more than one detection.
+    The NDS permits only one TP per target and therefore iteratively assigns the closest of the remaining targets.
+    This imitates the behavior by setting the distances between one target and all other detections to inf.
+    :param matches_distances:
+    :param score:
+    :return:
+    """
+    score_sort_idx = torch.sort(score, stable=True, descending=True).indices
+    matches_distances = matches_distances[score_sort_idx, :]
+    for i in range(matches_distances.shape[0]):
+        distance, index = matches_distances[i, :].min(dim=0)
+        if distance.item() == inf:
+            continue
+        matches_distances[:, index] = torch.inf
+        matches_distances[i, index] = distance
+
+    return matches_distances[score_sort_idx.argsort(), :]
+
+
+def _nds_update_assign_target(
+    threshold: float, distance: torch.Tensor, class_match: torch.Tensor, score
+) -> tuple[torch.Tensor, torch.Tensor]:
+    matches = torch.lt(distance, threshold) & class_match
+    matches_distances = distance.clone()
+    matches_distances[~matches] = torch.inf
+
+    # NuScenes assigns iteratively (by descending score) the closest remaining target to each detection.
+    # No target is assigned more than once. This is tricky to solve without iterating over detections.
+    matches_distances = _resolve_ambiguous_matches(matches_distances, score)
+    distance, index = matches_distances.min(dim=-1)
+    return distance, index

@@ -14,6 +14,7 @@ from ..functional.nds import (
     _calc_tp_err_orientation,
     _calc_tp_err_scale,
     _calc_tp_err_translation,
+    _nds_update_assign_target,
 )
 
 
@@ -102,8 +103,22 @@ class NuScenesDetectionScore(Metric):
 
             # Iterate over the distance thresholds
             for i, threshold in enumerate(self.distance_thresholds):
-                # TODO
-                raise NotImplementedError
+                # Assign each detection a target is possible, otherwise the returned distance is inf
+                match_distance, match_idx = _nds_update_assign_target(
+                    threshold, distance, class_match, score=detections["score"]
+                )
+
+                # Append the false positive state
+                mask_fp = torch.isinf(match_distance)
+                self._append_list_state(reference="fp_class", threshold=i, data=detections["class"][mask_fp])
+                self._append_list_state(reference="fp_score", threshold=i, data=detections["score"][mask_fp])
+
+                # Create the TP mask and an index that assigns targets the TP detections
+                mask_tp = ~mask_fp
+                target_idx = match_idx[mask_tp]
+                # Append the true positive state
+                self._append_list_state(reference="tp_class", threshold=i, data=detections["class"][mask_tp])
+                self._append_list_state(reference="tp_score", threshold=i, data=detections["score"][mask_tp])
 
     def compute(self, output_file: Optional[str] = None) -> Any:
         raise NotImplementedError
