@@ -333,3 +333,8 @@ def _nds_compute_mean_ap(class_ap: dict[int, float]) -> float:
     :return:
     """
     return float(np.mean(list(class_ap.values())))
+
+
+def _nds_compute_nds(averaged_ap: float, averaged_metrics: dict[str, float], ap_weight: float = 5.0) -> float:
+    scores = {metric: max(0.0, 1 - value) for metric, value in averaged_metrics.items()}
+    return float((ap_weight * averaged_ap + np.sum(tuple(scores.values()))) / (ap_weight + len(scores)))

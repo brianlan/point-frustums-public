@@ -1,3 +1,4 @@
+import json
 from collections.abc import Sequence
 from typing import Any, Optional
 
@@ -25,6 +26,7 @@ from ..functional.nds import (
     _nds_compute_average_ap_over_thresholds,
     _nds_compute_mean_metrics,
     _nds_compute_mean_ap,
+    _nds_compute_nds,
 )
 
 
@@ -142,6 +144,44 @@ class NuScenesDetectionScore(Metric):
     def _get_cat_state(self, state):
         return dim_zero_cat(getattr(self, state))
 
+    def _postprocess_metric_per_class(self, class_metrics: dict[str, dict[int, float]]) -> dict[str, dict[str, float]]:
+        """
+        Replace the internal metric name by the abbreviation and the class index by the alias.
+        :param class_metrics:
+        :return:
+        """
+        out_dict = {}
+        for metric, per_class in class_metrics.items():
+            per_class_out = {}
+            for i_cls, value in per_class.items():
+                per_class_out[self.annotations.classes.from_index(i_cls).name] = value
+            out_dict[self.tp_metrics_specification[metric]["id"]] = per_class_out
+        return out_dict
+
+    def _postprocess_interpolated_metrics(
+        self, interpolated_metrics: dict[int, dict[int, dict[str, float | torch.Tensor]]]
+    ) -> dict[float, dict[int, dict[str, float | list[float]]]]:
+        """
+        Replace the threshold index by the value, the class index by the alias and prepend the internal metric name
+        (translation -> err_translation). Applies to the interpolated curve and the average of the curve.
+        :param interpolated_metrics:
+        :return:
+        """
+        out_dict = {}
+        for i_thresh, per_class in interpolated_metrics.items():
+            threshold = self.distance_thresholds[i_thresh]
+            out_dict[threshold] = {}
+            for i_cls, metrics in per_class.items():
+                class_alias = self.annotations.classes.from_index(i_cls).name
+                out_dict[threshold][class_alias] = {}
+                for metric, val_or_curve in metrics.items():
+                    if metric in self.tp_metrics_specification:
+                        metric = f"err_{metric}"
+                    if isinstance(val_or_curve, torch.Tensor):
+                        val_or_curve = val_or_curve.tolist()
+                    out_dict[threshold][class_alias][metric] = val_or_curve
+        return out_dict
+
     def compute(self, output_file: Optional[str] = None) -> Any:
         interpolated_metrics = {}
         interpolated_metrics_mean = {}
@@ -201,3 +241,26 @@ class NuScenesDetectionScore(Metric):
         )
         averaged_metrics = _nds_compute_mean_metrics(class_metrics)
         averaged_ap = _nds_compute_mean_ap(class_ap)
+
+        collection = {
+            "NDS": _nds_compute_nds(averaged_ap, averaged_metrics, ap_weight=self.nds_map_weight),
+            "mAP": averaged_ap,
+            **{
+                f"m{specification['id']}": averaged_metrics[metric]
+                for metric, specification in self.tp_metrics_specification.items()
+            },
+            "per_class_value": {
+                "AP": {self.annotations.classes.from_index(i_cls).name: ap for i_cls, ap in class_ap.items()},
+                **self._postprocess_metric_per_class(class_metrics),
+            },
+            "per_threshold": {
+                "average": self._postprocess_interpolated_metrics(interpolated_metrics_mean),
+                "curve": self._postprocess_interpolated_metrics(interpolated_metrics),
+            },
+        }
+
+        if output_file is not None:
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(collection, f, indent=2)
+
+        return collection
