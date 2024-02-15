@@ -1,9 +1,26 @@
-from math import inf
+from math import inf, nan
 
 import torch
 from point_frustums.geometry.rotation_matrix import rotation_matrix_to_yaw
 from point_frustums.geometry.utils import angle_to_neg_pi_to_pi
 from point_frustums.functional import interpolate_to_support
+
+
+def cummean(x: torch.Tensor, dim: int = -1, replace_nan: bool = True):
+    """
+    This replicates the cummean behaviour of the nuscenes-devkit.
+    :param x:
+    :param dim:
+    :param replace_nan:
+    :return:
+    """
+    x_nan = torch.isnan(x)
+    if x_nan.all().item():
+        return torch.ones_like(x)
+    div = (~x_nan).cumsum(dim=dim).clamp(min=1e-8)
+    if replace_nan:
+        x = x.nan_to_num()
+    return x.cumsum(dim=dim) / div
 
 
 def _calc_tp_err_translation(detections: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -195,3 +212,53 @@ def _nds_compute_calculate_ap(precision: torch.Tensor, min_recall: float, min_pr
     min_recall_bin_index = round(min_recall * (n_bins - 1))
     normalization_factor = 1 - min_precision
     return (precision[min_recall_bin_index + 1 :] - min_precision).clamp(min=0).mean() / normalization_factor
+
+
+def _nds_compute_interpolate_tp_error(score, error, score_support):
+    """
+    Interpolate the error to the score in the range [0, 1]. Uses the cumulative mean of the error.
+    :param score:
+    :param error:
+    :param score_support:
+    :return:
+    """
+
+    if error.numel() == 0:
+        return torch.ones_like(score_support)
+
+    return interpolate_to_support(x=score, y=cummean(error), support=score_support, order="decreasing")
+
+
+def _nds_compute_calculate_tp_error(
+    error: torch.Tensor,
+    score: torch.Tensor,
+    metric_name: str,
+    class_name: str,
+    min_recall: float,
+    n_bins: int,
+) -> float:
+    """
+    Apply the min_recall threshold and compute the average error.
+    :param error:
+    :param score:
+    :param metric_name:
+    :param class_name:
+    :param min_recall:
+    :param n_bins:
+    :return:
+    """
+    if class_name in ("traffic_cone",) and metric_name in ("orientation", "velocity", "attribute"):
+        return nan
+    if class_name in ("barrier",) and metric_name in ("attribute", "velocity"):
+        return nan
+
+    # Everything below min_recall shall be excluded from the calculation
+    min_recall_bin_index_expected = round(min_recall * (n_bins - 1)) + 1
+    # The highest recall measured with nonzero score
+    max_recall_bin_index_actual = torch.gt(score, 0).count_nonzero().item()
+
+    # None of the detections passed the 0.1 threshold
+    if max_recall_bin_index_actual - 1 < min_recall_bin_index_expected:
+        return 1.0
+
+    return error[min_recall_bin_index_expected:max_recall_bin_index_actual].mean().item()
