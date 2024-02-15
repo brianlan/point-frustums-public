@@ -1,9 +1,13 @@
-from math import inf, nan
+from collections.abc import Iterable, Sequence
+from itertools import product
+from math import inf, nan, isnan
 
+import numpy as np
 import torch
+
+from point_frustums.functional import interpolate_to_support
 from point_frustums.geometry.rotation_matrix import rotation_matrix_to_yaw
 from point_frustums.geometry.utils import angle_to_neg_pi_to_pi
-from point_frustums.functional import interpolate_to_support
 
 
 def cummean(x: torch.Tensor, dim: int = -1, replace_nan: bool = True):
@@ -262,3 +266,70 @@ def _nds_compute_calculate_tp_error(
         return 1.0
 
     return error[min_recall_bin_index_expected:max_recall_bin_index_actual].mean().item()
+
+
+def _nds_compute_average_ap_over_thresholds(
+    recall_averaged_metrics: dict[int, dict[int, dict[str, float]]],
+    thresholds: Sequence[float],
+    n_classes: int,
+) -> dict[int, float]:
+    """
+    Returns a mapping from class index to the class AP.
+    :param recall_averaged_metrics:
+    :param thresholds:
+    :param n_classes:
+    :return:
+    """
+    average_ap = {i: [] for i in range(n_classes)}
+    for i_thresh, i_cls in product(range(len(thresholds)), range(n_classes)):
+        ap = recall_averaged_metrics[i_thresh][i_cls]["AP"]
+        if not isnan(ap):
+            average_ap[i_cls].append(ap)
+    return {i_cls: float(np.mean(v)) for i_cls, v in average_ap.items()}
+
+
+def _nds_compute_select_tp_metric_from_thresholds(
+    recall_averaged_metrics: dict[int, dict[int, dict[str, float]]],
+    threshold_idx: int,
+    n_classes: int,
+    tp_metrics: Sequence[str],
+) -> dict[str, dict[int, float]]:
+    """
+    Returns a nested mapping from the metric name to the class index to the class TP error.
+    :param recall_averaged_metrics:
+    :param threshold_idx:
+    :param n_classes:
+    :param tp_metrics:
+    :return:
+    """
+    metrics = {m: {} for m in tp_metrics}
+    for metric, i_cls in product(tp_metrics, range(n_classes)):
+        metrics[metric][i_cls] = float(recall_averaged_metrics[threshold_idx][i_cls][metric])
+    return metrics
+
+
+def _filter_nan(values: Iterable) -> list:
+    """
+    Return a subset of the iterable that does not contain any NaN values.
+    :param values:
+    :return:
+    """
+    return [v for v in values if not isnan(v)]
+
+
+def _nds_compute_mean_metrics(class_metrics: dict[str, dict[int, float]]) -> dict[str, float]:
+    """
+    Average the per-class error to get the mean TP error. Returns a mapping containing all mTP errors.
+    :param class_metrics:
+    :return:
+    """
+    return {metric: float(np.mean(_filter_nan(class_vals.values()))) for metric, class_vals in class_metrics.items()}
+
+
+def _nds_compute_mean_ap(class_ap: dict[int, float]) -> float:
+    """
+    Average the per-class average precision to get the mean average precision.
+    :param class_ap:
+    :return:
+    """
+    return float(np.mean(list(class_ap.values())))

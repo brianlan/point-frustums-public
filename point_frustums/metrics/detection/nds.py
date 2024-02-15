@@ -21,6 +21,10 @@ from ..functional.nds import (
     _nds_compute_calculate_ap,
     _nds_compute_interpolate_tp_error,
     _nds_compute_calculate_tp_error,
+    _nds_compute_select_tp_metric_from_thresholds,
+    _nds_compute_average_ap_over_thresholds,
+    _nds_compute_mean_metrics,
+    _nds_compute_mean_ap,
 )
 
 
@@ -186,3 +190,14 @@ class NuScenesDetectionScore(Metric):
                         min_recall=self.min_recall,
                         n_bins=self.n_points_interpolation,
                     )
+        class_ap = _nds_compute_average_ap_over_thresholds(
+            interpolated_metrics_mean, thresholds=self.distance_thresholds, n_classes=self.n_classes
+        )
+        class_metrics = _nds_compute_select_tp_metric_from_thresholds(
+            interpolated_metrics_mean,
+            threshold_idx=self.distance_thresholds.index(self.tp_threshold),
+            n_classes=self.n_classes,
+            tp_metrics=tuple(self.tp_metrics_specification.keys()),
+        )
+        averaged_metrics = _nds_compute_mean_metrics(class_metrics)
+        averaged_ap = _nds_compute_mean_ap(class_ap)
