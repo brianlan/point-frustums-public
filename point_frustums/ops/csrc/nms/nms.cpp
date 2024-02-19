@@ -97,6 +97,7 @@ at::Tensor NMSCpu(
         const at::Tensor &boxes,
         const double iou_threshold,
         const double distance_threshold) {
+
     if (labels_t.numel() == 0) {
         return at::empty({0}, boxes.options().dtype(at::kLong));
     }
@@ -114,7 +115,7 @@ at::Tensor NMSCpu(
     at::Tensor scores_sorted_idx_t = std::get<1>(scores.sort(0));
     auto scores_sorted_idx = scores_sorted_idx_t.data_ptr<int64_t>();
 
-    // Step 0: Initialize a boolean vector to all-true (mask which boxes are kept)
+    // Initialize a boolean vector to all-true (mask which boxes are kept)
     at::Tensor remains_t = torch::ones({N}, labels_t.options().dtype(at::kByte));
     auto remains = remains_t.data_ptr<uint8_t>();
 
@@ -133,7 +134,7 @@ at::Tensor NMSCpu(
                 continue;
 
             // If the center distance is large enough, there is no need to evaluate the IoU
-            if (norm(centers[i] - centers[j]) / volumes[i] > distance_threshold)
+            if ((norm(centers[i] - centers[j]) / volumes[i]) > distance_threshold)
                 continue;
 
             // Due to the sorted access, box j is guaranteed to have a higher score than box i

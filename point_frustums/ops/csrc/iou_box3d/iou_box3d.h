@@ -7,6 +7,7 @@
  */
 
 #pragma once
+
 #include <torch/extension.h>
 #include <tuple>
 #include "utils/pytorch3d_cutils.h"
@@ -22,51 +23,40 @@
 //          defined as: `iou = vol / (vol1 + vol2 - vol)`
 
 // CPU implementation
-std::tuple<at::Tensor, at::Tensor> IoUBox3DCpu(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2);
-std::tuple<at::Tensor, at::Tensor> IoUBox3DCpuPairwise(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2);
+std::tuple <at::Tensor, at::Tensor> IoUBox3DCpu(const at::Tensor &boxes1, const at::Tensor &boxes2);
 
+std::tuple <at::Tensor, at::Tensor> IoUBox3DCpuPairwise(const at::Tensor &boxes1, const at::Tensor &boxes2);
 
 
 // CUDA implementation
-std::tuple<at::Tensor, at::Tensor> IoUBox3DCuda(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2);
-std::tuple<at::Tensor, at::Tensor> IoUBox3DCudaPairwise(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2);
+std::tuple <at::Tensor, at::Tensor> IoUBox3DCuda(const at::Tensor &boxes1, const at::Tensor &boxes2);
+
+std::tuple <at::Tensor, at::Tensor> IoUBox3DCudaPairwise(const at::Tensor &boxes1, const at::Tensor &boxes2);
 
 // Implementation which is exposed
-inline std::tuple<at::Tensor, at::Tensor> IoUBox3D(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2) {
-  if (boxes1.is_cuda() || boxes2.is_cuda()) {
+inline std::tuple <at::Tensor, at::Tensor> IoUBox3D(const at::Tensor &boxes1, const at::Tensor &boxes2) {
+    if (boxes1.is_cuda() || boxes2.is_cuda()) {
 #ifdef WITH_CUDA
-    CHECK_CUDA(boxes1);
-    CHECK_CUDA(boxes2);
-    return IoUBox3DCuda(boxes1.contiguous(), boxes2.contiguous());
+        CHECK_CUDA(boxes1);
+        CHECK_CUDA(boxes2);
+        return IoUBox3DCuda(boxes1.contiguous(), boxes2.contiguous());
 #else
-    AT_ERROR("Not compiled with GPU support.");
+        AT_ERROR("Not compiled with GPU support.");
 #endif
-  }
-  return IoUBox3DCpu(boxes1.contiguous(), boxes2.contiguous());
+    }
+    return IoUBox3DCpu(boxes1.contiguous(), boxes2.contiguous());
 }
 
 // Additional modification that only evaluates pairs
-inline std::tuple<at::Tensor, at::Tensor> IoUBox3DPairwise(
-    const at::Tensor& boxes1,
-    const at::Tensor& boxes2) {
-  if (boxes1.is_cuda() || boxes2.is_cuda()) {
+inline std::tuple <at::Tensor, at::Tensor> IoUBox3DPairwise(const at::Tensor &boxes1, const at::Tensor &boxes2) {
+    if (boxes1.is_cuda() || boxes2.is_cuda()) {
 #ifdef WITH_CUDA
-    CHECK_CUDA(boxes1);
-    CHECK_CUDA(boxes2);
-    return IoUBox3DCudaPairwise(boxes1.contiguous(), boxes2.contiguous());
+        CHECK_CUDA(boxes1);
+        CHECK_CUDA(boxes2);
+        return IoUBox3DCudaPairwise(boxes1.contiguous(), boxes2.contiguous());
 #else
-    AT_ERROR("Not compiled with GPU support.");
+        AT_ERROR("Not compiled with GPU support.");
 #endif
-  }
-  return IoUBox3DCpuPairwise(boxes1.contiguous(), boxes2.contiguous());
+    }
+    return IoUBox3DCpuPairwise(boxes1.contiguous(), boxes2.contiguous());
 }
