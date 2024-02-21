@@ -20,4 +20,4 @@ def nms_3d(
     if labels.numel() == 0:
         return torch.empty_like(labels).bool()
 
-    return torch.ops.point_frustums.nms(labels, scores, boxes, iou_threshold, distance_threshold).bool()
+    return torch.ops.point_frustums.nms(labels.int(), scores, boxes, iou_threshold, distance_threshold).bool()

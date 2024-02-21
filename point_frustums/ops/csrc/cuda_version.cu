@@ -23,4 +23,4 @@ int get_cudart_version() {
   return version;
 #endif
 }
-} // namespace detectron2
+} // namespace point_frustums

@@ -1,6 +1,6 @@
-#include <torch/extension.h>
 #include "iou_box3d/iou_box3d.h"
 #include "nms/nms.h"
+#include <torch/extension.h>
 
 namespace point_frustums {
 
@@ -57,10 +57,7 @@ std::string get_compiler_version() {
 #endif
 
 #if defined(__clang_major__)
-  {
-    ss << "clang " << __clang_major__ << "." << __clang_minor__ << "."
-       << __clang_patchlevel__;
-  }
+  { ss << "clang " << __clang_major__ << "." << __clang_minor__ << "." << __clang_patchlevel__; }
 #endif
 
 #if defined(_MSC_VER)
