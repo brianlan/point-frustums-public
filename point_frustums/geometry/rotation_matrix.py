@@ -98,3 +98,7 @@ def rotation_matrix_from_roll_pitch_yaw(roll: torch.Tensor, pitch: torch.Tensor,
 
 rotation_matrix_to_quaternion = _rotation_matrix_to_quaternion
 rotation_matrix_to_rotation_6d = _matrix_to_rotation_6d
+
+
+def rotation_matrix_to_yaw(r: torch.Tensor) -> torch.Tensor:
+    return torch.atan2(r[..., 1, 0], r[..., 0, 0])

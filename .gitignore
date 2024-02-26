@@ -8,3 +8,4 @@
 /point_frustums.egg-info/
 
 /lightning_logs/
+/test/metrics/nds_test_output/*
