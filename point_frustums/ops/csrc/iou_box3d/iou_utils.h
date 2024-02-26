@@ -6,17 +6,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "utils/vec3.h"
 #include <ATen/ATen.h>
-#include <assert.h>
-#include <torch/extension.h>
-#include <torch/torch.h>
 #include <algorithm>
+#include <assert.h>
 #include <list>
 #include <numeric>
 #include <queue>
+#include <torch/extension.h>
+#include <torch/torch.h>
 #include <tuple>
 #include <type_traits>
-#include "utils/vec3.h"
 
 // dEpsilon: Used in dot products and is used to assess whether two unit vectors
 // are orthogonal (or coplanar). It's an epsilon on cos(θ).
@@ -37,26 +37,11 @@ _TRIS gives the triangle faces of the 3D box
 const int NUM_PLANES = 6;
 const int NUM_TRIS = 12;
 const int _PLANES[6][4] = {
-    {0, 1, 2, 3},
-    {3, 2, 6, 7},
-    {0, 1, 5, 4},
-    {0, 3, 7, 4},
-    {1, 5, 6, 2},
-    {4, 5, 6, 7},
+    {0, 1, 2, 3}, {3, 2, 6, 7}, {0, 1, 5, 4}, {0, 3, 7, 4}, {1, 5, 6, 2}, {4, 5, 6, 7},
 };
 const int _TRIS[12][3] = {
-    {0, 1, 2},
-    {0, 3, 2},
-    {4, 5, 6},
-    {4, 6, 7},
-    {1, 5, 6},
-    {1, 6, 2},
-    {0, 4, 7},
-    {0, 7, 3},
-    {3, 2, 6},
-    {3, 6, 7},
-    {0, 1, 5},
-    {0, 4, 5},
+    {0, 1, 2}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {1, 5, 6}, {1, 6, 2},
+    {0, 4, 7}, {0, 7, 3}, {3, 2, 6}, {3, 6, 7}, {0, 1, 5}, {0, 4, 5},
 };
 
 // Create a new data type for representing the
@@ -72,13 +57,9 @@ using face_verts = std::vector<std::vector<vec3<float>>>;
 // Returns
 //    vec3<T> (x, y, x) vertex coordinates
 //
-template <typename Box>
-inline vec3<float>
-ExtractVertsPlane(const Box& box, const int plane_idx, const int vert_idx) {
-  return vec3<float>(
-      box[_PLANES[plane_idx][vert_idx]][0],
-      box[_PLANES[plane_idx][vert_idx]][1],
-      box[_PLANES[plane_idx][vert_idx]][2]);
+template <typename Box> inline vec3<float> ExtractVertsPlane(const Box &box, const int plane_idx, const int vert_idx) {
+  return vec3<float>(box[_PLANES[plane_idx][vert_idx]][0], box[_PLANES[plane_idx][vert_idx]][1],
+                     box[_PLANES[plane_idx][vert_idx]][2]);
 }
 
 // Args
@@ -89,13 +70,9 @@ ExtractVertsPlane(const Box& box, const int plane_idx, const int vert_idx) {
 // Returns
 //    vec3<T> (x, y, x) vertex coordinates
 //
-template <typename Box>
-inline vec3<float>
-ExtractVertsTri(const Box& box, const int tri_idx, const int vert_idx) {
-  return vec3<float>(
-      box[_TRIS[tri_idx][vert_idx]][0],
-      box[_TRIS[tri_idx][vert_idx]][1],
-      box[_TRIS[tri_idx][vert_idx]][2]);
+template <typename Box> inline vec3<float> ExtractVertsTri(const Box &box, const int tri_idx, const int vert_idx) {
+  return vec3<float>(box[_TRIS[tri_idx][vert_idx]][0], box[_TRIS[tri_idx][vert_idx]][1],
+                     box[_TRIS[tri_idx][vert_idx]][2]);
 }
 
 // Args
@@ -105,8 +82,7 @@ ExtractVertsTri(const Box& box, const int tri_idx, const int vert_idx) {
 //    std::vector<std::vector<vec3<T>>> effectively (F, 3, 3)
 //      coordinates of the verts for each face
 //
-template <typename Box>
-inline face_verts GetBoxTris(const Box& box) {
+template <typename Box> inline face_verts GetBoxTris(const Box &box) {
   face_verts box_tris;
   for (int t = 0; t < NUM_TRIS; ++t) {
     vec3<float> v0 = ExtractVertsTri(box, t, 0);
@@ -124,8 +100,7 @@ inline face_verts GetBoxTris(const Box& box) {
 //    std::vector<std::vector<vec3<T>>> effectively (P, 3, 3)
 //      coordinates of the 4 verts for each plane
 //
-template <typename Box>
-inline face_verts GetBoxPlanes(const Box& box) {
+template <typename Box> inline face_verts GetBoxPlanes(const Box &box) {
   face_verts box_planes;
   for (int t = 0; t < NUM_PLANES; ++t) {
     vec3<float> v0 = ExtractVertsPlane(box, t, 0);
@@ -159,7 +134,7 @@ inline vec3<float> GetNormal(const vec3<float> e0, const vec3<float> e1) {
 // Returns
 //    vec3: center of the triangle
 //
-inline vec3<float> TriCenter(const std::vector<vec3<float>>& tri) {
+inline vec3<float> TriCenter(const std::vector<vec3<float>> &tri) {
   // Vertices of the triangle
   const vec3<float> v0 = tri[0];
   const vec3<float> v1 = tri[1];
@@ -178,7 +153,7 @@ inline vec3<float> TriCenter(const std::vector<vec3<float>>& tri) {
 // Returns
 //    vec3: normal for the face
 //
-inline vec3<float> TriNormal(const std::vector<vec3<float>>& tri) {
+inline vec3<float> TriNormal(const std::vector<vec3<float>> &tri) {
   // Get center of triangle
   const vec3<float> ctr = TriCenter(tri);
 
@@ -204,7 +179,7 @@ inline vec3<float> TriNormal(const std::vector<vec3<float>>& tri) {
 // Returns
 //    vec3: center of the plane
 //
-inline vec3<float> PlaneCenter(const std::vector<vec3<float>>& plane) {
+inline vec3<float> PlaneCenter(const std::vector<vec3<float>> &plane) {
   // Vertices of the plane
   const vec3<float> v0 = plane[0];
   const vec3<float> v1 = plane[1];
@@ -224,7 +199,7 @@ inline vec3<float> PlaneCenter(const std::vector<vec3<float>>& plane) {
 // Returns
 //    vec3: normal of the planar face
 //
-inline vec3<float> PlaneNormal(const std::vector<vec3<float>>& plane) {
+inline vec3<float> PlaneNormal(const std::vector<vec3<float>> &plane) {
   // Get center of planar face
   vec3<float> ctr = PlaneCenter(plane);
 
@@ -253,7 +228,7 @@ inline vec3<float> PlaneNormal(const std::vector<vec3<float>>& plane) {
 // Returns
 //    float: area for the face
 //
-inline float FaceArea(const std::vector<vec3<float>>& tri) {
+inline float FaceArea(const std::vector<vec3<float>> &tri) {
   // Get verts for face
   const vec3<float> v0 = tri[0];
   const vec3<float> v1 = tri[1];
@@ -274,9 +249,7 @@ inline float FaceArea(const std::vector<vec3<float>>& tri) {
 //    vec3: normal for the plane such that it points towards
 //      the center of the box
 //
-inline vec3<float> PlaneNormalDirection(
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& center) {
+inline vec3<float> PlaneNormalDirection(const std::vector<vec3<float>> &plane, const vec3<float> &center) {
   // The plane's center & normal
   const vec3<float> plane_center = PlaneCenter(plane);
   vec3<float> n = PlaneNormal(plane);
@@ -311,9 +284,7 @@ inline vec3<float> PlaneNormalDirection(
 // Returns
 //    float: volume of the box
 //
-inline float BoxVolume(
-    const face_verts& box_tris,
-    const vec3<float>& box_center) {
+inline float BoxVolume(const face_verts &box_tris, const vec3<float> &box_center) {
   float box_vol = 0.0;
   // Iterate through each triange, calculate the area of the
   // tetrahedron formed with the box_center and sum them
@@ -339,12 +310,10 @@ inline float BoxVolume(
 // Returns
 //    vec3: coordinates of the center of the box
 //
-inline vec3<float> BoxCenter(const at::Tensor& box_verts) {
-  const auto& box_center_t = at::mean(box_verts, 0);
-  const vec3<float> box_center(
-      box_center_t[0].item<float>(),
-      box_center_t[1].item<float>(),
-      box_center_t[2].item<float>());
+inline vec3<float> BoxCenter(const at::Tensor &box_verts) {
+  const auto &box_center_t = at::mean(box_verts, 0);
+  const vec3<float> box_center(box_center_t[0].item<float>(), box_center_t[1].item<float>(),
+                               box_center_t[2].item<float>());
   return box_center;
 }
 
@@ -358,7 +327,7 @@ inline vec3<float> BoxCenter(const at::Tensor& box_verts) {
 // Returns
 //    vec3: coordinates of the center of the polyhedron
 //
-inline vec3<float> PolyhedronCenter(const face_verts& tris) {
+inline vec3<float> PolyhedronCenter(const face_verts &tris) {
   float x = 0.0;
   float y = 0.0;
   float z = 0.0;
@@ -400,10 +369,7 @@ inline vec3<float> PolyhedronCenter(const face_verts& tris) {
 // Returns
 //    bool: whether or not the point is inside the plane
 //
-inline bool IsInside(
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& normal,
-    const vec3<float>& point) {
+inline bool IsInside(const std::vector<vec3<float>> &plane, const vec3<float> &normal, const vec3<float> &point) {
   // The center of the plane
   const vec3<float> plane_ctr = PlaneCenter(plane);
 
@@ -429,11 +395,8 @@ inline bool IsInside(
 // Returns
 //    vec3: position of the intersection point
 //
-inline vec3<float> PlaneEdgeIntersection(
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& normal,
-    const vec3<float>& p0,
-    const vec3<float>& p1) {
+inline vec3<float> PlaneEdgeIntersection(const std::vector<vec3<float>> &plane, const vec3<float> &normal,
+                                         const vec3<float> &p0, const vec3<float> &p1) {
   // The center of the plane
   const vec3<float> plane_ctr = PlaneCenter(plane);
 
@@ -465,15 +428,14 @@ inline vec3<float> PlaneEdgeIntersection(
 //    v1m, v2m: vec3 vectors of the most distant points
 //          in verts1 and verts2 respectively
 //
-inline std::tuple<vec3<float>, vec3<float>> ArgMaxVerts(
-    const std::vector<vec3<float>>& verts1,
-    const std::vector<vec3<float>>& verts2) {
+inline std::tuple<vec3<float>, vec3<float>> ArgMaxVerts(const std::vector<vec3<float>> &verts1,
+                                                        const std::vector<vec3<float>> &verts2) {
   vec3<float> v1m = {0.0f, 0.0f, 0.0f};
   vec3<float> v2m = {0.0f, 0.0f, 0.0f};
   float maxdist = -1.0f;
 
-  for (const auto& v1 : verts1) {
-    for (const auto& v2 : verts2) {
+  for (const auto &v1 : verts1) {
+    for (const auto &v2 : verts2) {
       if (norm(v1 - v2) > maxdist) {
         v1m = v1;
         v2m = v2;
@@ -494,9 +456,7 @@ inline std::tuple<vec3<float>, vec3<float>> ArgMaxVerts(
 // Returns
 //    bool: whether or not the two faces are coplanar
 //
-inline bool IsCoplanarTriTri(
-    const std::vector<vec3<float>>& tri1,
-    const std::vector<vec3<float>>& tri2) {
+inline bool IsCoplanarTriTri(const std::vector<vec3<float>> &tri1, const std::vector<vec3<float>> &tri2) {
   // Get normal for tri 1
   const vec3<float> n1 = TriNormal(tri1);
 
@@ -514,8 +474,7 @@ inline bool IsCoplanarTriTri(
   vec3<float> n12m = v1m - v2m;
   n12m = n12m / std::fmaxf(norm(n12m), kEpsilon);
 
-  const bool check2 = (std::abs(dot(n12m, n1)) < dEpsilon) ||
-      (std::abs(dot(n12m, n2)) < dEpsilon);
+  const bool check2 = (std::abs(dot(n12m, n1)) < dEpsilon) || (std::abs(dot(n12m, n2)) < dEpsilon);
 
   return (check1 && check2);
 }
@@ -531,10 +490,8 @@ inline bool IsCoplanarTriTri(
 // Returns
 //    bool: whether or not the two faces are coplanar
 //
-inline bool IsCoplanarTriPlane(
-    const std::vector<vec3<float>>& tri,
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& normal) {
+inline bool IsCoplanarTriPlane(const std::vector<vec3<float>> &tri, const std::vector<vec3<float>> &plane,
+                               const vec3<float> &normal) {
   // Get normal for tri
   const vec3<float> nt = TriNormal(tri);
 
@@ -571,12 +528,8 @@ inline bool IsCoplanarTriPlane(
 //    std::vector<std::vector<vec3>>: vector of vertex coordinates
 //      of the new triangle faces
 //
-inline face_verts ClipTriByPlaneOneOut(
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& normal,
-    const vec3<float>& vout,
-    const vec3<float>& vin1,
-    const vec3<float>& vin2) {
+inline face_verts ClipTriByPlaneOneOut(const std::vector<vec3<float>> &plane, const vec3<float> &normal,
+                                       const vec3<float> &vout, const vec3<float> &vin1, const vec3<float> &vin2) {
   // point of intersection between plane and (vin1, vout)
   const vec3<float> pint1 = PlaneEdgeIntersection(plane, normal, vin1, vout);
   // point of intersection between plane and (vin2, vout)
@@ -600,12 +553,8 @@ inline face_verts ClipTriByPlaneOneOut(
 //    std::vector<std::vector<vec3>>: vector of vertex coordinates
 //      of the new triangle face
 //
-inline face_verts ClipTriByPlaneTwoOut(
-    const std::vector<vec3<float>>& plane,
-    const vec3<float>& normal,
-    const vec3<float>& vout1,
-    const vec3<float>& vout2,
-    const vec3<float>& vin) {
+inline face_verts ClipTriByPlaneTwoOut(const std::vector<vec3<float>> &plane, const vec3<float> &normal,
+                                       const vec3<float> &vout1, const vec3<float> &vout2, const vec3<float> &vin) {
   // point of intersection between plane and (vin, vout1)
   const vec3<float> pint1 = PlaneEdgeIntersection(plane, normal, vin, vout1);
   // point of intersection between plane and (vin, vout2)
@@ -629,10 +578,8 @@ inline face_verts ClipTriByPlaneTwoOut(
 //      of the new triangle faces formed after clipping.
 //      All triangles are now "inside" the plane.
 //
-inline face_verts ClipTriByPlane(
-    const std::vector<vec3<float>>& plane,
-    const std::vector<vec3<float>>& tri,
-    const vec3<float>& normal) {
+inline face_verts ClipTriByPlane(const std::vector<vec3<float>> &plane, const std::vector<vec3<float>> &tri,
+                                 const vec3<float> &normal) {
   // Get Triangle vertices
   const vec3<float> v0 = tri[0];
   const vec3<float> v1 = tri[1];
@@ -706,10 +653,7 @@ inline face_verts ClipTriByPlane(
 //      of the new triangle faces formed after clipping.
 //      All triangles are now "inside" the planes.
 //
-inline face_verts BoxIntersections(
-    const face_verts& tris,
-    const face_verts& planes,
-    const vec3<float>& center) {
+inline face_verts BoxIntersections(const face_verts &tris, const face_verts &planes, const vec3<float> &center) {
   // Create a new vector to avoid modifying in place
   face_verts out_tris = tris;
   for (int p = 0; p < NUM_PLANES; ++p) {

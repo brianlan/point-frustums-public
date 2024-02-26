@@ -88,7 +88,7 @@ setup(
         "nuscenes-devkit>=1.1.10",
         "numpy>=1.24.2",
         "torch>=2.1.0",
-        "torchvision>=0.15.0",
+        "torchvision",
         "tensorboard>=2.12.2",
         "torch_tb_profiler",
         "xformers==0.0.23",

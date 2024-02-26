@@ -15,6 +15,16 @@ class Targets(NamedTuple):
     attribute: Optional[Tensor] = None
     velocity: Optional[Tensor] = None
 
+    def dict(self):
+        return {
+            "class": self.label,
+            "center": self.center,
+            "wlh": self.wlh,
+            "orientation": self.orientation,
+            "velocity": self.velocity,
+            "attribute": self.attribute,
+        }
+
 
 class TargetHelpers:
     """

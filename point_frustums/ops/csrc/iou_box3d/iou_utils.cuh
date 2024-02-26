@@ -5,12 +5,12 @@
  * This source code is licensed under the BSD-style license found in the
  * LICENSE file in the root directory of this source tree.
  */
+#pragma once
 
+#include "utils/float_math.cuh"
 #include <float.h>
 #include <math.h>
 #include <thrust/device_vector.h>
-#include <cstdio>
-#include "utils/float_math.cuh"
 
 // dEpsilon: Used in dot products and is used to assess whether two unit vectors
 // are orthogonal (or coplanar). It's an epsilon on cos(θ).
@@ -60,26 +60,11 @@ struct Keep {
 };
 
 __device__ FaceVertsIdx _PLANES[] = {
-    {0, 1, 2, 3},
-    {3, 2, 6, 7},
-    {0, 1, 5, 4},
-    {0, 3, 7, 4},
-    {1, 5, 6, 2},
-    {4, 5, 6, 7},
+    {0, 1, 2, 3}, {3, 2, 6, 7}, {0, 1, 5, 4}, {0, 3, 7, 4}, {1, 5, 6, 2}, {4, 5, 6, 7},
 };
 __device__ FaceVertsIdx _TRIS[] = {
-    {0, 1, 2},
-    {0, 3, 2},
-    {4, 5, 6},
-    {4, 6, 7},
-    {1, 5, 6},
-    {1, 6, 2},
-    {0, 4, 7},
-    {0, 7, 3},
-    {3, 2, 6},
-    {3, 6, 7},
-    {0, 1, 5},
-    {0, 4, 5},
+    {0, 1, 2}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {1, 5, 6}, {1, 6, 2},
+    {0, 4, 7}, {0, 7, 3}, {3, 2, 6}, {3, 6, 7}, {0, 1, 5}, {0, 4, 5},
 };
 
 // Args
@@ -90,15 +75,11 @@ __device__ FaceVertsIdx _TRIS[] = {
 //
 // Returns: None (output saved to box_tris)
 //
-template <typename Box, typename BoxTris>
-__device__ inline void GetBoxTris(const Box& box, BoxTris& box_tris) {
+template <typename Box, typename BoxTris> __device__ inline void GetBoxTris(const Box &box, BoxTris &box_tris) {
   for (int t = 0; t < NUM_TRIS; ++t) {
-    const float3 v0 = make_float3(
-        box[_TRIS[t].v0][0], box[_TRIS[t].v0][1], box[_TRIS[t].v0][2]);
-    const float3 v1 = make_float3(
-        box[_TRIS[t].v1][0], box[_TRIS[t].v1][1], box[_TRIS[t].v1][2]);
-    const float3 v2 = make_float3(
-        box[_TRIS[t].v2][0], box[_TRIS[t].v2][1], box[_TRIS[t].v2][2]);
+    const float3 v0 = make_float3(box[_TRIS[t].v0][0], box[_TRIS[t].v0][1], box[_TRIS[t].v0][2]);
+    const float3 v1 = make_float3(box[_TRIS[t].v1][0], box[_TRIS[t].v1][1], box[_TRIS[t].v1][2]);
+    const float3 v2 = make_float3(box[_TRIS[t].v2][0], box[_TRIS[t].v2][1], box[_TRIS[t].v2][2]);
     box_tris[t] = {v0, v1, v2};
   }
 }
@@ -112,18 +93,12 @@ __device__ inline void GetBoxTris(const Box& box, BoxTris& box_tris) {
 // Returns: None (output saved to box_planes)
 //
 template <typename Box, typename FaceVertsBoxPlanes>
-__device__ inline void GetBoxPlanes(
-    const Box& box,
-    FaceVertsBoxPlanes& box_planes) {
+__device__ inline void GetBoxPlanes(const Box &box, FaceVertsBoxPlanes &box_planes) {
   for (int t = 0; t < NUM_PLANES; ++t) {
-    const float3 v0 = make_float3(
-        box[_PLANES[t].v0][0], box[_PLANES[t].v0][1], box[_PLANES[t].v0][2]);
-    const float3 v1 = make_float3(
-        box[_PLANES[t].v1][0], box[_PLANES[t].v1][1], box[_PLANES[t].v1][2]);
-    const float3 v2 = make_float3(
-        box[_PLANES[t].v2][0], box[_PLANES[t].v2][1], box[_PLANES[t].v2][2]);
-    const float3 v3 = make_float3(
-        box[_PLANES[t].v3][0], box[_PLANES[t].v3][1], box[_PLANES[t].v3][2]);
+    const float3 v0 = make_float3(box[_PLANES[t].v0][0], box[_PLANES[t].v0][1], box[_PLANES[t].v0][2]);
+    const float3 v1 = make_float3(box[_PLANES[t].v1][0], box[_PLANES[t].v1][1], box[_PLANES[t].v1][2]);
+    const float3 v2 = make_float3(box[_PLANES[t].v2][0], box[_PLANES[t].v2][1], box[_PLANES[t].v2][2]);
+    const float3 v3 = make_float3(box[_PLANES[t].v3][0], box[_PLANES[t].v3][1], box[_PLANES[t].v3][2]);
     box_planes[t] = {v0, v1, v2, v3};
   }
 }
@@ -136,10 +111,9 @@ __device__ inline void GetBoxPlanes(
 // Returns
 //    float3: Geometric center of the vertices.
 //
-__device__ inline float3 FaceCenter(
-    std::initializer_list<const float3> vertices) {
+__device__ inline float3 FaceCenter(std::initializer_list<const float3> vertices) {
   auto sumVertices = float3{};
-  for (const auto& vertex : vertices) {
+  for (const auto &vertex : vertices) {
     sumVertices = sumVertices + vertex;
   }
   return sumVertices / vertices.size();
@@ -169,8 +143,7 @@ __device__ inline float3 GetNormal(const float3 e0, const float3 e1) {
 // Returns
 //    float3: center of the plane
 //
-__device__ inline float3 FaceNormal(
-    std::initializer_list<const float3> vertices) {
+__device__ inline float3 FaceNormal(std::initializer_list<const float3> vertices) {
   const auto faceCenter = FaceCenter(vertices);
   auto normal = float3();
   auto maxDist = -1;
@@ -199,7 +172,7 @@ __device__ inline float3 FaceNormal(
 // Returns
 //    float: area for the face
 //
-__device__ inline float FaceArea(const FaceVerts& tri) {
+__device__ inline float FaceArea(const FaceVerts &tri) {
   // Get verts for face 1
   const float3 n = cross(tri.v1 - tri.v0, tri.v2 - tri.v0);
   return norm(n) / 2.0;
@@ -218,12 +191,9 @@ __device__ inline float FaceArea(const FaceVerts& tri) {
 //      the center of the box
 //
 template <typename FaceVertsPlane>
-__device__ inline float3 PlaneNormalDirection(
-    const FaceVertsPlane& plane,
-    const float3& center) {
+__device__ inline float3 PlaneNormalDirection(const FaceVertsPlane &plane, const float3 &center) {
   // The plane's center
-  const float3 plane_center =
-      FaceCenter({plane.v0, plane.v1, plane.v2, plane.v3});
+  const float3 plane_center = FaceCenter({plane.v0, plane.v1, plane.v2, plane.v3});
 
   // The plane's normal
   float3 n = FaceNormal({plane.v0, plane.v1, plane.v2, plane.v3});
@@ -259,12 +229,9 @@ __device__ inline float3 PlaneNormalDirection(
 //    float: volume of the box
 //
 template <typename BoxTris>
-__device__ inline float BoxVolume(
-    const BoxTris& box_tris,
-    const float3& box_center,
-    const int num_tris) {
+__device__ inline float BoxVolume(const BoxTris &box_tris, const float3 &box_center, const int num_tris) {
   float box_vol = 0.0;
-  // Iterate through each triange, calculate the area of the
+  // Iterate through each triangle, calculate the area of the
   // tetrahedron formed with the box_center and sum them
   for (int t = 0; t < num_tris; ++t) {
     // Subtract the center:
@@ -292,8 +259,7 @@ __device__ inline float BoxVolume(
 // Returns
 //    float3: coordinates of the center of the box
 //
-template <typename Box>
-__device__ inline float3 BoxCenter(const Box box_verts) {
+template <typename Box> __device__ inline float3 BoxCenter(const Box box_verts) {
   float x = 0.0;
   float y = 0.0;
   float z = 0.0;
@@ -322,10 +288,7 @@ __device__ inline float3 BoxCenter(const Box box_verts) {
 // Returns
 //    float3: coordinates of the center of the polyhedron
 //
-template <typename Tris>
-__device__ inline float3 PolyhedronCenter(
-    const Tris& tris,
-    const int num_tris) {
+template <typename Tris> __device__ inline float3 PolyhedronCenter(const Tris &tris, const int num_tris) {
   float x = 0.0;
   float y = 0.0;
   float z = 0.0;
@@ -366,8 +329,7 @@ __device__ inline float3 PolyhedronCenter(
 // Returns
 //    bool: whether or not the point is inside the plane
 //
-__device__ inline bool
-IsInside(const FaceVerts& plane, const float3& normal, const float3& point) {
+__device__ inline bool IsInside(const FaceVerts &plane, const float3 &normal, const float3 &point) {
   // The center of the plane
   const float3 plane_ctr = FaceCenter({plane.v0, plane.v1, plane.v2, plane.v3});
 
@@ -393,11 +355,8 @@ IsInside(const FaceVerts& plane, const float3& normal, const float3& point) {
 // Returns
 //    float3: position of the intersection point
 //
-__device__ inline float3 PlaneEdgeIntersection(
-    const FaceVerts& plane,
-    const float3& normal,
-    const float3& p0,
-    const float3& p1) {
+__device__ inline float3 PlaneEdgeIntersection(const FaceVerts &plane, const float3 &normal, const float3 &p0,
+                                               const float3 &p1) {
   // The center of the plane
   const float3 plane_ctr = FaceCenter({plane.v0, plane.v1, plane.v2, plane.v3});
 
@@ -430,15 +389,14 @@ __device__ inline float3 PlaneEdgeIntersection(
 //    v1m, v2m: float3 vectors of the most distant points
 //          in verts1 and verts2 respectively
 //
-__device__ inline std::tuple<float3, float3> ArgMaxVerts(
-    std::initializer_list<float3> verts1,
-    std::initializer_list<float3> verts2) {
+__device__ inline std::tuple<float3, float3> ArgMaxVerts(std::initializer_list<float3> verts1,
+                                                         std::initializer_list<float3> verts2) {
   auto v1m = float3();
   auto v2m = float3();
   float maxdist = -1.0f;
 
-  for (const auto& v1 : verts1) {
-    for (const auto& v2 : verts2) {
+  for (const auto &v1 : verts1) {
+    for (const auto &v2 : verts2) {
       if (norm(v1 - v2) > maxdist) {
         v1m = v1;
         v2m = v2;
@@ -459,9 +417,7 @@ __device__ inline std::tuple<float3, float3> ArgMaxVerts(
 // Returns
 //    bool: whether or not the two faces are coplanar
 //
-__device__ inline bool IsCoplanarTriTri(
-    const FaceVerts& tri1,
-    const FaceVerts& tri2) {
+__device__ inline bool IsCoplanarTriTri(const FaceVerts &tri1, const FaceVerts &tri2) {
   const float3 tri1_ctr = FaceCenter({tri1.v0, tri1.v1, tri1.v2});
   const float3 tri1_n = FaceNormal({tri1.v0, tri1.v1, tri1.v2});
 
@@ -472,16 +428,14 @@ __device__ inline bool IsCoplanarTriTri(
   const bool check1 = abs(dot(tri1_n, tri2_n)) > 1 - dEpsilon;
 
   // Compute most distant points
-  const auto v1mAndv2m =
-      ArgMaxVerts({tri1.v0, tri1.v1, tri1.v2}, {tri2.v0, tri2.v1, tri2.v2});
+  const auto v1mAndv2m = ArgMaxVerts({tri1.v0, tri1.v1, tri1.v2}, {tri2.v0, tri2.v1, tri2.v2});
   const auto v1m = std::get<0>(v1mAndv2m);
   const auto v2m = std::get<1>(v1mAndv2m);
 
   float3 n12m = v1m - v2m;
   n12m = n12m / fmaxf(norm(n12m), kEpsilon);
 
-  const bool check2 = (abs(dot(n12m, tri1_n)) < dEpsilon) ||
-      (abs(dot(n12m, tri2_n)) < dEpsilon);
+  const bool check2 = (abs(dot(n12m, tri1_n)) < dEpsilon) || (abs(dot(n12m, tri2_n)) < dEpsilon);
 
   return (check1 && check2);
 }
@@ -497,10 +451,7 @@ __device__ inline bool IsCoplanarTriTri(
 // Returns
 //    bool: whether or not the two faces are coplanar
 //
-__device__ inline bool IsCoplanarTriPlane(
-    const FaceVerts& tri,
-    const FaceVerts& plane,
-    const float3& normal) {
+__device__ inline bool IsCoplanarTriPlane(const FaceVerts &tri, const FaceVerts &plane, const float3 &normal) {
   const float3 tri_ctr = FaceCenter({tri.v0, tri.v1, tri.v2});
   const float3 nt = FaceNormal({tri.v0, tri.v1, tri.v2});
 
@@ -508,8 +459,7 @@ __device__ inline bool IsCoplanarTriPlane(
   const bool check1 = abs(dot(nt, normal)) > 1 - dEpsilon;
 
   // Compute most distant points
-  const auto v1mAndv2m = ArgMaxVerts(
-      {tri.v0, tri.v1, tri.v2}, {plane.v0, plane.v1, plane.v2, plane.v3});
+  const auto v1mAndv2m = ArgMaxVerts({tri.v0, tri.v1, tri.v2}, {plane.v0, plane.v1, plane.v2, plane.v3});
   const auto v1m = std::get<0>(v1mAndv2m);
   const auto v2m = std::get<1>(v1mAndv2m);
 
@@ -544,13 +494,8 @@ __device__ inline bool IsCoplanarTriPlane(
 //      to face_verts_out
 //
 template <typename FaceVertsBox>
-__device__ inline int ClipTriByPlaneOneOut(
-    const FaceVerts& plane,
-    const float3& normal,
-    const float3& vout,
-    const float3& vin1,
-    const float3& vin2,
-    FaceVertsBox& face_verts_out) {
+__device__ inline int ClipTriByPlaneOneOut(const FaceVerts &plane, const float3 &normal, const float3 &vout,
+                                           const float3 &vin1, const float3 &vin2, FaceVertsBox &face_verts_out) {
   // point of intersection between plane and (vin1, vout)
   const float3 pint1 = PlaneEdgeIntersection(plane, normal, vin1, vout);
   // point of intersection between plane and (vin2, vout)
@@ -584,13 +529,8 @@ __device__ inline int ClipTriByPlaneOneOut(
 //      to face_verts_out
 //
 template <typename FaceVertsBox>
-__device__ inline int ClipTriByPlaneTwoOut(
-    const FaceVerts& plane,
-    const float3& normal,
-    const float3& vout1,
-    const float3& vout2,
-    const float3& vin,
-    FaceVertsBox& face_verts_out) {
+__device__ inline int ClipTriByPlaneTwoOut(const FaceVerts &plane, const float3 &normal, const float3 &vout1,
+                                           const float3 &vout2, const float3 &vin, FaceVertsBox &face_verts_out) {
   // point of intersection between plane and (vin, vout1)
   const float3 pint1 = PlaneEdgeIntersection(plane, normal, vin, vout1);
   // point of intersection between plane and (vin, vout2)
@@ -621,11 +561,8 @@ __device__ inline int ClipTriByPlaneTwoOut(
 //      to face_verts_out
 //
 template <typename FaceVertsBox>
-__device__ inline int ClipTriByPlane(
-    const FaceVerts& plane,
-    const FaceVerts& tri,
-    const float3& normal,
-    FaceVertsBox& face_verts_out) {
+__device__ inline int ClipTriByPlane(const FaceVerts &plane, const FaceVerts &tri, const float3 &normal,
+                                     FaceVertsBox &face_verts_out) {
   // Get Triangle vertices
   const float3 v0 = tri.v0;
   const float3 v1 = tri.v1;
@@ -702,10 +639,8 @@ __device__ inline int ClipTriByPlane(
 //      to face_verts_out
 //
 template <typename FaceVertsPlane, typename FaceVertsBox>
-__device__ inline int BoxIntersections(
-    const FaceVertsPlane& planes,
-    const float3& center,
-    FaceVertsBox& face_verts_out) {
+__device__ inline int BoxIntersections(const FaceVertsPlane &planes, const float3 &center,
+                                       FaceVertsBox &face_verts_out) {
   // Initialize num tris to 12
   int num_tris = NUM_TRIS;
   for (int p = 0; p < NUM_PLANES; ++p) {
@@ -720,8 +655,7 @@ __device__ inline int BoxIntersections(
     for (int t = 0; t < num_tris; ++t) {
       // Clip tri by plane, can max be split into 2 triangles
       FaceVerts tri_updated[2];
-      const int count =
-          ClipTriByPlane(planes[p], face_verts_out[t], n2, tri_updated);
+      const int count = ClipTriByPlane(planes[p], face_verts_out[t], n2, tri_updated);
       // Add to the tri_verts_updated output if not empty
       for (int v = 0; v < count; ++v) {
         tri_verts_updated[offset] = tri_updated[v];
@@ -735,4 +669,73 @@ __device__ inline int BoxIntersections(
     }
   }
   return num_tris;
+}
+
+template <typename BoxTris, typename BoxPlanes>
+__device__ inline thrust::tuple<float, float>
+GetIntersectionAndUnion(const float3 &box1_center, const float3 &box2_center, const BoxTris &box1_tris,
+                        const BoxTris &box2_tris, const BoxPlanes &box1_planes, const BoxPlanes &box2_planes,
+                        const float box1_vol, const float box2_vol) {
+  FaceVerts box1_intersect[MAX_TRIS];
+  for (int j = 0; j < NUM_TRIS; ++j) {
+    // Initialize the faces from the box
+    box1_intersect[j] = box1_tris[j];
+  }
+  // Get the count of the actual number of faces in the intersecting shape
+  int box1_count = BoxIntersections(box2_planes, box2_center, box1_intersect);
+
+  // Tris in Box2 intersection with Planes in Box1
+  FaceVerts box2_intersect[MAX_TRIS];
+  for (int j = 0; j < NUM_TRIS; ++j) {
+    box2_intersect[j] = box2_tris[j];
+  }
+  const int box2_count = BoxIntersections(box1_planes, box1_center, box2_intersect);
+
+  // If there are overlapping regions in Box2, remove any coplanar faces
+  if (box2_count > 0) {
+    // Identify if any triangles in Box2 are coplanar with Box1
+    Keep tri2_keep[MAX_TRIS];
+    for (int j = 0; j < MAX_TRIS; ++j) {
+      // Initialize the valid faces to be true
+      tri2_keep[j].keep = j < box2_count ? true : false;
+    }
+    for (int b1 = 0; b1 < box1_count; ++b1) {
+      for (int b2 = 0; b2 < box2_count; ++b2) {
+        const bool is_coplanar = IsCoplanarTriTri(box1_intersect[b1], box2_intersect[b2]);
+        const float area = FaceArea(box1_intersect[b1]);
+        if ((is_coplanar) && (area > aEpsilon)) {
+          tri2_keep[b2].keep = false;
+        }
+      }
+    }
+
+    // Keep only the non-coplanar triangles in Box2 - add them to the Box1
+    // triangles.
+    for (int b2 = 0; b2 < box2_count; ++b2) {
+      if (tri2_keep[b2].keep) {
+        box1_intersect[box1_count] = box2_intersect[b2];
+        // box1_count will determine the total faces in the
+        // intersecting shape
+        box1_count++;
+      }
+    }
+  }
+
+  // Initialize the vol and iou to 0.0 in case there are no triangles in the
+  // intersecting shape.
+  float vol = 0.0;
+  float iou = 0.0;
+
+  // If there are triangles in the intersecting shape
+  if (box1_count > 0) {
+    // The intersecting shape is a polyhedron made up of the triangular faces in
+    // box1_intersect. Calculate the polyhedron center
+    const float3 poly_center = PolyhedronCenter(box1_intersect, box1_count);
+    // Compute intersecting polyhedron volume
+    vol = BoxVolume(box1_intersect, poly_center, box1_count);
+    // Compute IoU
+    iou = vol / (box1_vol + box2_vol - vol);
+  }
+
+  return thrust::make_tuple(vol, iou);
 }
