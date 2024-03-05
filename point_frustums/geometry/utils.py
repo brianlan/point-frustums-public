@@ -104,7 +104,7 @@ def get_corners_3d(centers: torch.Tensor, wlh: torch.Tensor, orientation: torch.
 
 
 @torch.jit.script
-def get_spherical_projection_boundaries(
+def get_featuremap_projection_boundaries(
     centers: torch.Tensor,
     wlh: torch.Tensor,
     orientation: torch.Tensor,
@@ -113,6 +113,17 @@ def get_spherical_projection_boundaries(
     delta_pol: float,
     delta_azi: float,
 ) -> torch.Tensor:
+    """
+    Project the 3D box onto the 2D featuremap and return the 4 corners of the encapsulating 2D upright bounding box.
+    :param centers:
+    :param wlh:
+    :param orientation:
+    :param fov_pol:
+    :param fov_azi:
+    :param delta_pol:
+    :param delta_azi:
+    :return:
+    """
     # Get 8 corner points of 3D boxes [N, 8, 3]
     corners = get_corners_3d(centers=centers, wlh=wlh, orientation=orientation)
     # Transform cartesian corner coordinates to spherical coordinates

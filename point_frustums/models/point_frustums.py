@@ -21,7 +21,7 @@ from point_frustums.geometry.rotation_matrix import (
     rotation_matrix_to_rotation_6d,
     rotation_matrix_from_rotation_6d,
 )
-from point_frustums.geometry.utils import get_corners_3d, get_spherical_projection_boundaries, iou_vol_3d
+from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
@@ -188,9 +188,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             nodes_pol = torch.arange(0, discretize.n_splits_pol - 1e-8, step=stride[0])
             nodes_azi = torch.arange(0, discretize.n_splits_azi - 1e-8, step=stride[1])
 
-            # Create meshgrid representation for easy indexing
-            nodes_pol, nodes_azi = torch.meshgrid(nodes_pol, nodes_azi, indexing="xy")
-            nodes_pol, nodes_azi = nodes_pol.flatten(), nodes_azi.flatten()
+            # Create meshgrid representation for easy indexing (in row-major ordering)
+            nodes_azi, nodes_pol = torch.meshgrid(nodes_azi, nodes_pol, indexing="xy")
+            nodes_azi, nodes_pol = nodes_azi.flatten(), nodes_pol.flatten()
             # Merge to obtain the [x, y] coordinates of the centers
             feat_rfs_center.append(torch.stack((nodes_azi, nodes_pol), dim=1))
             # size_per_layer.append(feat_center_grid[-1].shape[0])
@@ -220,18 +220,34 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
     @property
     def receptive_fields(self):
+        """
+        The bounding box corresponding to the receptive field of the feature vector.
+        :return:
+        """
         return self.get_buffer("feat_rfs")
 
     @property
     def receptive_fields_sizes(self):
+        """
+        The receptive field size of the feature vector.
+        :return:
+        """
         return self.get_buffer("feat_rfs_sizes")
 
     @property
     def receptive_fields_centers(self):
+        """
+        The featuremap coordinate/index corresponding to the featuremap location.
+        :return:
+        """
         return self.get_buffer("feat_rfs_centers")
 
     @property
     def feature_vectors_angular_centers(self):
+        """
+        The {theta, phi}-coordinate corresponding to the featuremap location.
+        :return:
+        """
         return self.get_buffer("feat_center_pol_azi")
 
     @staticmethod
@@ -250,7 +266,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         :param idx_feat:
         :return:
         """
-        center_pol_azi = self.feat_center_pol_azi
+        center_pol_azi = self.feature_vectors_angular_centers
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
@@ -266,7 +282,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         :param idx_feat:
         :return:
         """
-        center_pol_azi = self.feat_center_pol_azi
+        center_pol_azi = self.feature_vectors_angular_centers
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
@@ -373,7 +389,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if target_labels is None:
             return torch.full((self.featuremap_parametrization.total_size,), -1, device=self.device)
 
-        targets_spherical_projection = get_spherical_projection_boundaries(
+        targets_spherical_projection = get_featuremap_projection_boundaries(
             centers=targets.center,
             wlh=targets.wlh,
             orientation=targets.orientation,
@@ -445,7 +461,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Set the demand to ones as each prediction requires to be assigned to exactly one class (object or background)
         demand = torch.ones((self.featuremap_parametrization.total_size,), device=self.device).float()
         # Based on the IoU, evaluate how many predictions each of the targets can supply, constrain by min_k and top_k
-        supply = torch.topk(iou, dim=0, k=self.target_assignment.min_k).values.sum(dim=0)
+        supply = torch.topk(iou, dim=0, k=self.target_assignment.max_k).values.sum(dim=0)
         supply = torch.clamp(supply, min=self.target_assignment.min_k)
         # Append the unassigned supply for the background class (note: tensor.sum returns a 0D tensor)
         unassigned_supply = self.featuremap_parametrization.total_size - supply.sum()
@@ -476,6 +492,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
     @staticmethod
     def _broadcast_targets(targets: list[torch.Tensor], indices: list[torch.tensor]) -> torch.Tensor:
+        """
+        Index-select targets that correspond to the foreground predictions and concatenate samples from the batch.
+        :param targets:
+        :param indices:
+        :return:
+        """
         return torch.cat([t[i, ...] for i, t in zip(indices, targets)], dim=0)
 
     def _loss_center(
@@ -621,14 +643,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
             targets_label.append(target_labels[index, :])
             targets_attribute.append(self._one_hot(targets[i].attribute, self.dataset.annotations.n_attributes, index))
-            iou = torch.zeros_like(index, dtype=torch.float).index_put_(
-                (fg,),
-                iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0],
-            )
+            iou = torch.zeros_like(index, dtype=torch.float)
+            iou[fg] = iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0]
+            # Take the one-hot encoded and broadcasted target labels from this sample and scale with the IoU
             targets_iou.append(targets_label[-1] * iou[:, None])
 
         foreground = torch.stack(foreground, dim=0)
-        foreground_idx = foreground.nonzero().unbind(-1)[1]
+        foreground_idx = foreground.nonzero()[:, 1]
         targets_label = torch.stack(targets_label, dim=0)
         targets_attribute = torch.stack(targets_attribute, dim=0)
         targets_iou = torch.stack(targets_iou, dim=0).detach()
@@ -645,7 +666,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the center coordinate
             losses.update(
                 self._loss_center(
-                    predictions_center_fg=output["center"][foreground],
+                    predictions_center_fg=output["center"][foreground, ...],
                     foreground_idx=foreground_idx,
                     targets_center=[t.center for t in targets],
                     targets_indices_fg=targets_indices,
@@ -654,7 +675,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the size
             losses.update(
                 self._loss_wlh(
-                    predictions_wlh_fg=output["wlh"][foreground],
+                    predictions_wlh_fg=output["wlh"][foreground, ...],
                     targets_wlh=[t.wlh for t in targets],
                     targets_indices_fg=targets_indices,
                 )
@@ -662,7 +683,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the orientation
             losses.update(
                 self._loss_orientation(
-                    predictions_orientation_fg=output["orientation"][foreground],
+                    predictions_orientation_fg=output["orientation"][foreground, ...],
                     foreground_idx=foreground_idx,
                     targets_orientation=[t.orientation for t in targets],
                     targets_indices_fg=targets_indices,
@@ -671,7 +692,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             # Evaluate the loss imposed on the velocity
             losses.update(
                 self._loss_velocity(
-                    predictions_velocity_fg=output["velocity"][foreground],
+                    predictions_velocity_fg=output["velocity"][foreground, ...],
                     ego_velocities=ego_velocities,
                     foreground_idx=foreground_idx,
                     targets_velocity=[t.velocity for t in targets],
@@ -709,7 +730,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         """
         output = self._flatten_output_channels_last(output=output)
 
-        score = torch.sigmoid(output["class"] + output["vfl"])
+        score = torch.sigmoid(output["class"] + self.predictions.score_vfl_factor * output["vfl"])
         batch_size = score.shape[0]
 
         # Get the indices of outputs that surpass the confidence threshold:
