@@ -4,8 +4,8 @@ import torch
 from torch import nn
 from torchvision.models.resnet import Bottleneck, conv1x1
 
-from point_frustums.ops.spherical_coos_convolutions import Conv2dSpherical
 from point_frustums.config_dataclasses.fpn import ConfigFPNLayer, ConfigFPNExtraLayer
+from point_frustums.ops.spherical_coos_convolutions import Conv2dSpherical
 
 
 class BottleneckRangeImage(Bottleneck):
@@ -140,7 +140,7 @@ class FPN(nn.Module):
                 self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, layer.stride),
             ]
             # Step 2: Add the remaining blocks (no stride/downsampling)
-            for _ in range(layer.n_blocks):
+            for _ in range(1, layer.n_blocks):
                 layers.append(nn.Dropout2d(self.dropout))
                 layers.append(self.block(n_channels_out, layer.n_channels, norm_layer=self.norm_layer))
             up[name] = nn.Sequential(*layers)
@@ -151,7 +151,7 @@ class FPN(nn.Module):
             if prev is not None:
                 # Delay initialization of the bottom-up pathway by one layer as it is dependent on the specification of
                 # the consecutive layer
-                down[prev] = nn.Upsample(scale_factor=layer.stride, mode=self.upsampling_mode, align_corners=True)
+                down[prev] = nn.Upsample(scale_factor=layer.stride, mode=self.upsampling_mode)
                 post[prev] = nn.Sequential(
                     nn.Dropout2d(self.dropout),
                     Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3),
