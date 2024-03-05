@@ -172,6 +172,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         size_per_layer = []
         size_per_layer_flat = []
         feat_rfs_center = []
+        stride_per_layer = []
         for layer, stride in self.strides.items():
             assert isclose(discretize.n_splits_pol % stride[0], 0), (
                 f"The polar input featuremap resolution {discretize.n_splits_pol} is not divisible by the stride "
@@ -181,6 +182,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 f"The azimuthal input featuremap resolution {discretize.n_splits_azi} is not divisible by the "
                 f"stride {stride[1]} on layer {layer}."
             )
+            stride_per_layer.append(stride)
             size_per_layer.append((int(discretize.n_splits_pol / stride[0]), int(discretize.n_splits_azi / stride[1])))
             size_per_layer_flat.append(int(discretize.n_splits / prod(stride)))
 
@@ -193,7 +195,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             nodes_azi, nodes_pol = nodes_azi.flatten(), nodes_pol.flatten()
             # Merge to obtain the [x, y] coordinates of the centers
             feat_rfs_center.append(torch.stack((nodes_azi, nodes_pol), dim=1))
-            # size_per_layer.append(feat_center_grid[-1].shape[0])
+
+        stride_per_layer = torch.tensor(stride_per_layer)
+
         feat_rfs_center = torch.cat(feat_rfs_center, dim=0)
         self.register_buffer("feat_rfs_centers", feat_rfs_center)
 
@@ -206,9 +210,11 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Scale-scale-shift grid centers to angular center coordinates
         feat_center_pol_azi = feat_rfs_center[:, [1, 0]]
-        feat_center_pol_azi.div_(torch.tensor([discretize.n_splits_pol, discretize.n_splits_azi]))
-        feat_center_pol_azi.mul_(torch.tensor([discretize.range_pol, discretize.range_azi]))
-        feat_center_pol_azi.add_(torch.tensor([discretize.fov_pol[0], discretize.fov_azi[0]]))
+        feat_center_pol_azi /= torch.tensor([discretize.n_splits_pol, discretize.n_splits_azi])
+        feat_center_pol_azi *= torch.tensor([discretize.range_pol, discretize.range_azi])
+        feat_center_pol_azi += torch.tensor([discretize.fov_pol[0], discretize.fov_azi[0]])
+        frustum_width_per_layer = stride_per_layer * torch.tensor([discretize.delta_pol, discretize.delta_azi])
+        feat_center_pol_azi += (frustum_width_per_layer / 2).repeat_interleave(torch.tensor(size_per_layer_flat), dim=0)
         self.register_buffer("feat_center_pol_azi", feat_center_pol_azi)
 
         return ModelOutputSpecification(
