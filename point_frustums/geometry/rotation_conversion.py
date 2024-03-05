@@ -217,8 +217,6 @@ def _axis_angle_to_rotation_matrix(axis, angle) -> torch.Tensor:
     """
     Use the Rodrigues-formula [1] to construct `n` random rotation matrices.
     [1]: Q(d, theta) = I + sin(theta) D + (1-cos(theta))D^2  with D = -d @ levi and D^2 = D @ D
-    :param n:
-    :param device:
     :return:
     """
     dyad = -torch.einsum("ij,jkl->ikl", axis, levi_civita_symbol(device=axis.device))

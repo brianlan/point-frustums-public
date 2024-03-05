@@ -23,6 +23,7 @@ from .rotation_conversion import (
 rotation_matrix_from_quaternion = _quaternion_to_rotation_matrix
 rotation_matrix_from_spherical_coordinates = _spherical_coordinates_to_rotation_matrix
 rotation_matrix_from_rotation_6d = _rotation_6d_to_matrix
+rotation_matrix_from_axis_angle = _axis_angle_to_rotation_matrix
 
 
 def random_rotation_matrix(n: int, device="cpu") -> torch.Tensor:
