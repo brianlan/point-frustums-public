@@ -784,7 +784,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
     def training_step(self, batch, batch_idx):
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
-        ego_velocities = [torch.from_numpy(sample["velocity"]).to(self.device) for sample in batch["metadata"]]
+        ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
 
         losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
         loss = self.sum_losses(losses)
@@ -796,8 +796,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     def validation_step(self, batch, batch_idx):
         batch_size = len(batch["metadata"])
         output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
-        ego_velocities = [torch.from_numpy(sample["velocity"]).to(self.device) for sample in batch["metadata"]]
-
+        ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
         losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
         loss = self.sum_losses(losses)
         for key, value in losses.items():

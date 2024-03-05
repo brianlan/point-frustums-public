@@ -363,7 +363,7 @@ class NuScenes(Dataset):
                 # Load the inverse rotation between the calibrated sensor and the EGO vehicle as Quaternion
                 rotation = Quaternion(calibrated_sensor_data["rotation"]).inverse
                 # Transform to the COOS of the annotations
-                velocity = rotation.inverse.rotate(velocity).astype(np.float32)
+                velocity = torch.from_numpy(rotation.inverse.rotate(velocity).astype(np.float32))
             meta["velocity"] = velocity
 
         return meta
