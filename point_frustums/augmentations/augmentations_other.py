@@ -2,6 +2,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Optional
+from math import ceil
 
 import torch
 
@@ -56,6 +57,44 @@ class Normalize(Augmentation):
 
     def targets(self, targets: Targets):
         return targets
+
+    def metadata(self, metadata: MutableMapping):
+        return metadata
+
+
+class SubsampleData(Augmentation):
+    """
+    Randomly subsample the data.
+    """
+
+    def __init__(self, drop_ratio, n_max=1_000_000, **kwargs):
+        super().__init__(**kwargs)
+        assert 0 <= drop_ratio <= 1
+        self._keep_ratio = 1 - drop_ratio
+        self._n_max = n_max
+        self._rng = torch.Generator()
+
+    def lidar(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
+        """
+        Remove a fraction of the points.
+        :param data:
+        :param metadata:
+        :return:
+        """
+        n_points, n_dims = data.shape
+        indices_full = torch.randperm(n_points, generator=self._rng)
+        n_points = ceil(self._keep_ratio * (min(n_points, self._n_max)))
+        indices = indices_full[:n_points]
+        return data[indices, ...]
+
+    def camera(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
+        raise NotImplementedError()
+
+    def radar(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
+        raise NotImplementedError()
+
+    def targets(self, targets: Targets):
+        raise SyntaxError("Subsampling should not be applied to targets.")
 
     def metadata(self, metadata: MutableMapping):
         return metadata

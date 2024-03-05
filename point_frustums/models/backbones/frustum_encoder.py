@@ -500,7 +500,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
             featuremap.extend(
                 self.apply_symmetric_functions(
                     pc=self.ffn_vectorize(pc),
-                    n_frustums=self.n_splits,
+                    n_frustums=self.discretize.n_splits,
                     i_frustum=i_frustum,
                     i_inv=i_inv,
                     counts_padded=counts_padded,

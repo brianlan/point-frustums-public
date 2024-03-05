@@ -1,6 +1,6 @@
-from typing import Literal, Optional
-from math import prod, exp, isclose
 from copy import deepcopy
+from math import prod, exp, isclose
+from typing import Literal, Optional
 
 import torch
 from torch import nn, optim
@@ -15,13 +15,13 @@ from point_frustums.config_dataclasses.point_frustums import (
     Predictions,
 )
 from point_frustums.geometry.coordinate_system_conversion import sph_to_cart_torch, cart_to_sph_torch
-from point_frustums.geometry.utils import get_corners_3d, get_spherical_projection_boundaries, iou_vol_3d
 from point_frustums.geometry.quaternion import rotate_2d
 from point_frustums.geometry.rotation_matrix import (
     rotation_matrix_from_spherical_coordinates,
     rotation_matrix_to_rotation_6d,
     rotation_matrix_from_rotation_6d,
 )
+from point_frustums.geometry.utils import get_corners_3d, get_spherical_projection_boundaries, iou_vol_3d
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
@@ -760,7 +760,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             )
             nms_keep_indices = nms_keep_mask.nonzero().squeeze(dim=1)
             # Subset the duplicate-free outputs to the configured number of detections
-            k = min(nms_keep_mask.count_nonzero(), self.predictions.n_detections)
+            k = nms_keep_mask.count_nonzero().min(torch.tensor(self.predictions.n_detections))
             detections_top_scores, detections_top_indices = sample_top_scores[nms_keep_mask].topk(k)
             detections_top_indices = nms_keep_indices[detections_top_indices]
 
