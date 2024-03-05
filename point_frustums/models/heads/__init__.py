@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from copy import deepcopy
 from math import isclose
 
@@ -65,7 +64,7 @@ class PointFrustumsHead(Head):
 
         head = nn.ModuleList()
         for _ in self.layers_in:
-            if not share_weights:
+            if share_weights is False:
                 layers = deepcopy(layers)
             head.append(layers)
 

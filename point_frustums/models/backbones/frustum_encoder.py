@@ -365,6 +365,10 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
 
     @cached_property
     def n_channels(self) -> Mapping:
+        """
+        The number of channels returned by each of the four stages {input, decorated, squashed, reduced}.
+        :return:
+        """
         stages = {"input": len(self.channels_in)}
 
         # Determine the output dimensionality of the decorator

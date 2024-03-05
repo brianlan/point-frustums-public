@@ -64,7 +64,7 @@ def interpolate_to_support(
     right_padding = right if right is not None else y[-1]
     left_index, right_index = x_lower_bound.nonzero()[0], x_upper_bound.nonzero()[-1]
     support_values[:left_index] = left_padding
-    support_values[right_index + 1 :] = right_padding
+    support_values[right_index + 1 :] = right_padding  # NOQA: Whitespace before ':'
 
     if order == "decreasing":
         support_values = support_values.flip(dims=(0,))

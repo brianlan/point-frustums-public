@@ -1,0 +1,62 @@
+
+version: v1.0-mini
+name: NuScenes
+sensors:
+  LIDAR_TOP:
+    active: True
+    modality: lidar
+    channels_out: [x, y, z, intensity, timestamp, radial, polar, azimuthal]
+    angle_of_view_degrees:
+      polar: 40
+      azimuthal: 360
+    orientation_degrees:
+      polar: 0
+      azimuthal: -90
+    sweeps: 7
+  CAM_FRONT:
+    active: False
+    modality: camera
+    channels_out: [r, g, b]
+    angle_of_view_degrees:
+      polar: 40
+      azimuthal: 70
+    orientation_degrees:
+      polar: 90
+      azimuthal: 0
+    resolution:
+      polar: 900
+      azimuthal: 1600
+
+annotations:
+  coos: LIDAR_TOP
+  visibility: 0
+  class_aliases: [pedestrian, car, bus, bicycle, truck, trailer, construction_vehicle, traffic_cone, barrier, motorcycle]
+  alias_to_class:
+    pedestrian: human.pedestrian
+    car: vehicle.car
+    bus: vehicle.bus
+    bicycle: vehicle.bicycle
+    truck: vehicle.truck
+    trailer: vehicle.trailer
+    construction_vehicle: vehicle.construction
+    traffic_cone: movable_object.trafficcone
+    barrier: movable_object.barrier
+    motorcycle: vehicle.motorcycle
+  alias_to_category:
+    pedestrian: pedestrian
+    car: vehicle
+    bus: vehicle
+    bicycle: cycle
+    truck: vehicle
+    trailer: vehicle
+    construction_vehicle: vehicle
+    traffic_cone: other
+    barrier: other
+    motorcycle: cycle
+  category_to_attributes:
+    pedestrian: [ moving, standing, sitting_lying_down ]
+    vehicle: [ moving, parked, stopped ]
+    cycle: [ with_rider, without_rider ]
+    other: [ void ]
+load_velocity: True
+load_can: True
