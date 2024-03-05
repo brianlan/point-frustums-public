@@ -59,8 +59,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.predictions = predictions
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
-    def configure_model(self) -> None:
-        self.setup_logger()
+    def setup(self, *args, **kwargs):
+        # Required to access the dataloader at setup time:
+        # https://github.com/Lightning-AI/pytorch-lightning/issues/10430#issuecomment-1487753339
+        self.trainer.fit_loop.setup_data()
+
+        if bool(self.trainer.fast_dev_run) is False:  # NOQA
+            self.setup_logger()
 
     def setup_logger(self):
         if isinstance(self.logger.experiment, torch.utils.tensorboard.SummaryWriter):  # NOQA
@@ -811,6 +816,16 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         pass
 
     def configure_optimizers(self, *args, **kwargs):
-        optimizer = optim.AdamW(self.parameters())
-        # lr_scheduler = optim.lr_scheduler.OneCycleLR(optimizer)
-        return [optimizer], []
+        lr = 1e-2
+        optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.05, amsgrad=True)
+        lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer=optimizer,
+            max_lr=lr,
+            epochs=self.trainer.max_epochs,
+            steps_per_epoch=len(self.trainer.train_dataloader) // self.trainer.accumulate_grad_batches,
+        )
+        lr_scheduler_config = {
+            "scheduler": lr_scheduler,
+            "interval": "step",
+        }
+        return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}
