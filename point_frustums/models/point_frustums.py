@@ -260,9 +260,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     def _one_hot(label: torch.Tensor, num_classes: int, index: Optional[torch.Tensor] = None) -> torch.Tensor:
         assert label.dim() == 1
         one_hot = F.one_hot(label.clip(min=0), num_classes=num_classes)  # pylint: disable=not-callable
-        one_hot = torch.where(torch.ge(label[:, None], 0), one_hot, 0)
         if index is not None:
             one_hot = one_hot[index, ...]
+            mask = torch.ge(index, torch.zeros_like(index))
+            one_hot[~mask, :] = 0
         return one_hot.float()
 
     def _encode_center(self, x: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -647,7 +648,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             target_indices = index[fg]
             targets_indices.append(target_indices)
 
-            targets_label.append(target_labels[index, :])
+            target_labels = target_labels[index, :]
+            target_labels[~fg, :] = 0
+            targets_label.append(target_labels)
             targets_attribute.append(self._one_hot(targets[i].attribute, self.dataset.annotations.n_attributes, index))
             iou = torch.zeros_like(index, dtype=torch.float)
             iou[fg] = iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0]
