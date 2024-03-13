@@ -21,20 +21,53 @@ data:
         - class_path: point_frustums.augmentations.SubsampleData
           init_args:
             apply_to: [lidar]
-            drop_ratio: 0.3
+            drop_ratio: 0.4
         - class_path: point_frustums.augmentations.RandomFlipHorizontal
           init_args:
             apply_to: [lidar, targets]
             dimension_mapping_lidar: {y: 1, azimuthal: 7}
-            probability: 0.5
+            probability: 0.4
         - class_path: point_frustums.augmentations.RandomRotate
           init_args:
             apply_to: [ lidar, targets ]
             dimension_mapping_lidar: { x: 0, y: 1, z: 2, azimuthal: 7 }
             probability: 0.8
-      #val: []
-      #test: []
-      #predict: []
+      val:
+        - class_path: point_frustums.augmentations.Normalize
+          init_args:
+            apply_to: [ lidar ]
+            lidar:
+              channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
+              mean: [ -0.776, 18.421, 0.098, 12.978 ]
+              std: [ 1.869, 19.603, 0.057, 12.559 ]
+            camera:
+              channels: [ 0, 1, 2 ]
+              mean: [ 123.675, 116.28, 103.53 ]
+              std: [ 58.395, 57.12, 57.375 ]
+      test:
+        - class_path: point_frustums.augmentations.Normalize
+          init_args:
+            apply_to: [ lidar ]
+            lidar:
+              channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
+              mean: [ -0.776, 18.421, 0.098, 12.978 ]
+              std: [ 1.869, 19.603, 0.057, 12.559 ]
+            camera:
+              channels: [ 0, 1, 2 ]
+              mean: [ 123.675, 116.28, 103.53 ]
+              std: [ 58.395, 57.12, 57.375 ]
+      predict:
+        - class_path: point_frustums.augmentations.Normalize
+          init_args:
+            apply_to: [ lidar ]
+            lidar:
+              channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
+              mean: [ -0.776, 18.421, 0.098, 12.978 ]
+              std: [ 1.869, 19.603, 0.057, 12.559 ]
+            camera:
+              channels: [ 0, 1, 2 ]
+              mean: [ 123.675, 116.28, 103.53 ]
+              std: [ 58.395, 57.12, 57.375 ]
 
 dataset:
   version: v1.0-mini
@@ -50,7 +83,7 @@ dataset:
       orientation_degrees:
         polar: 0
         azimuthal: -90
-      sweeps: 7
+      sweeps: 4
     CAM_FRONT:
       active: False
       modality: camera
@@ -103,23 +136,18 @@ model: ./point_frustums.yaml
 
 
 trainer:
-  max_epochs: 20
+  default_root_dir: training
+  max_epochs: 24
   log_every_n_steps: 2
-  accumulate_grad_batches: 4
-  gradient_clip_val: 2
+  accumulate_grad_batches: 5
+  gradient_clip_val: 10
   gradient_clip_algorithm: norm
   callbacks: [ LearningRateMonitor, RichProgressBar ]
-
-#optimizer:
-#  class_path: torch.optim.AdamW
-#  init_args:
-#    weight_decay: 0.05
-#
-#lr_scheduler:
-#  class_path: torch.optim.lr_scheduler.OneCycleLR
-#  init_args:
-#    max_lr: 1e-2
-#    epochs: 24
-#    steps_per_epoch: 80
-#    div_factor: 2e1
-#    final_div_factor: 1e3
+  logger:
+    - class_path: pytorch_lightning.loggers.TensorBoardLogger
+      init_args:
+        save_dir: training_logs
+    - class_path: pytorch_lightning.loggers.WandbLogger
+      init_args:
+        project: point_frustums
+        save_dir: training_logs

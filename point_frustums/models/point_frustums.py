@@ -1,10 +1,10 @@
+import random
 from copy import deepcopy
 from math import prod, exp, isclose
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
 import torch
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch import nn, optim
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
@@ -15,6 +15,7 @@ from point_frustums.config_dataclasses.point_frustums import (
     TargetAssignment,
     Losses,
     Predictions,
+    Logging,
 )
 from point_frustums.geometry.coordinate_system_conversion import sph_to_cart_torch, cart_to_sph_torch
 from point_frustums.geometry.quaternion import rotate_2d
@@ -26,6 +27,7 @@ from point_frustums.geometry.rotation_matrix import (
 from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
 from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
+from point_frustums.utils.logging import log_pointcloud
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
 from .base_models import Detection3DModel
@@ -50,6 +52,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         target_assignment: TargetAssignment,
         losses: Losses,
         predictions: Predictions,
+        logging: Logging,
         **kwargs,
     ):
         super().__init__(*args, model=model, dataset=dataset, **kwargs)
@@ -60,6 +63,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.target_assignment = target_assignment
         self.losses = losses
         self.predictions = predictions
+        self.logging = logging
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
         self.nds_val = NuScenesDetectionScore(dataset.annotations)
@@ -823,11 +827,40 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return batch_detections  # NOQA: Cannot infer return type Tensor in the above lines
 
-    def _post_loss(self, step_output, batch, mode: Literal["train", "val"] = "train"):
+    def _post_loss(self, step_output, batch, mode: Literal["train", "val"]):
         for key, value in step_output["losses"].items():
             self.log(f"Loss/{key}/{mode}", value, batch_size=len(batch["metadata"]))
 
-    def training_step(self, batch, batch_idx):
+    def _post_pointcloud(self, batch, detections, logging_frequency: int = 1, prefix: Optional[str] = None):
+        if logging_frequency is None:
+            return
+
+        if isinstance(prefix, str):
+            prefix = prefix + " "
+        else:
+            prefix = ""
+
+        batch_size = len(batch["metadata"])
+        for i in range(batch_size):
+            if random.random() > (1 / logging_frequency):
+                continue
+
+            tag = prefix + "Sample: " + batch["metadata"][i]["sample_token"]
+            for logger in self.loggers:
+                log_pointcloud(
+                    logger,
+                    data=batch.get("lidar")["LIDAR_TOP"][i],
+                    augmentations_log=batch["metadata"][i].get("augmentations", {}),
+                    targets=batch.get("targets")[i].dict(),
+                    detections=detections[i],
+                    label_enum=self.dataset.annotations.classes,
+                    tag=tag,
+                    step=self.global_step,
+                )
+
+    TRAIN_STEP_OUTPUT = dict[Literal["loss", "losses", "network_output"], Any]
+
+    def training_step(self, batch, batch_idx) -> TRAIN_STEP_OUTPUT:
         network_output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
         # Put the EGO velocity per sample into a list
         ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
@@ -836,7 +869,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         losses["sum"] = self.sum_losses(losses)
         return {"loss": losses["sum"], "losses": losses, "network_output": network_output}
 
-    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int):
+    def on_train_batch_end(self, outputs: TRAIN_STEP_OUTPUT, batch: Any, batch_idx: int):
         self._post_loss(step_output=outputs, batch=batch, mode="train")
         if (batch_idx % self.trainer.log_every_n_steps) == 0:  # NOQA
             ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
@@ -844,8 +877,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             detections = self.get_detections(output=outputs["network_output"], ego_velocities=ego_velocities)
             nds = self.nds_train(detections, [t.dict() for t in batch["targets"]])
             self.log_dict(self.nds_train.log_dict(nds, mode="train"))
+            modified_frequency = self.logging.frequency_log_train_sample / self.trainer.log_every_n_steps  # NOQA
+            self._post_pointcloud(batch, detections, logging_frequency=modified_frequency, prefix="Train")
 
-    def validation_step(self, batch, batch_idx):
+    VAL_STEP_OUTPUT = dict[Literal["losses", "detections", "network"], Any]
+
+    def validation_step(self, batch, batch_idx) -> VAL_STEP_OUTPUT:
         network_output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
         # Put the EGO velocity per sample into a list
         ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
@@ -854,12 +891,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         losses["sum"] = self.sum_losses(losses)
         detections = self.get_detections(output=network_output, ego_velocities=ego_velocities)
         self.nds_val.update(batch_detections=detections, batch_targets=[t.dict() for t in batch["targets"]])
-        return {"losses": losses, "detections": detections, "network_output": network_output}
+        return {"losses": losses, "detections": detections}
 
-    def on_validation_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int, dataloader_idx: int = 0):
+    def on_validation_batch_end(self, outputs: VAL_STEP_OUTPUT, batch: Any, batch_idx: int, dataloader_idx: int = 0):
         self._post_loss(step_output=outputs, batch=batch, mode="val")
+        self._post_pointcloud(
+            batch=batch,
+            detections=outputs["detections"],
+            logging_frequency=self.logging.frequency_log_val_sample,
+            prefix="Val",
+        )
         # TODO: I might want to store detections in results.json file for the NuScenes Evaluator
-        # TODO: I might want to post some sample detections to tensorboard from time to time
 
     def on_validation_epoch_end(self) -> None:
         nds = self.nds_val.compute()

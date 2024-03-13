@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
 
 from point_frustums.geometry.utils import deg_to_rad
 
@@ -20,6 +20,12 @@ class Predictions:
     top_k: int = 1_000
     n_detections: int = 100
     nms_threshold: float = 0.6
+
+
+@dataclass(slots=True, frozen=True)
+class Logging:
+    frequency_log_train_sample: Optional[int] = None
+    frequency_log_val_sample: Optional[int] = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,10 +1,10 @@
-import os
 import glob
-from setuptools import setup, find_packages
+import os
+
 import numpy as np
 import torch
+from setuptools import setup, find_packages
 from torch.utils.cpp_extension import CUDA_HOME, CppExtension, CUDAExtension, ROCM_HOME
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT = "point_frustums"
@@ -97,6 +97,7 @@ setup(
         "loguru",
         "prettytable",
         "PyYaml",
+        "wandb",
     ],
     extras_require={"dev": ["pytest", "pylint", "pre-commit", "black", "pycln"], "test": ["pytest"]},
     ext_modules=get_extensions(),
