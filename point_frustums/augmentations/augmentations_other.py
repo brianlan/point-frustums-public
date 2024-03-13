@@ -1,8 +1,8 @@
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Optional
 from math import ceil
+from typing import Optional
 
 import torch
 
@@ -24,6 +24,20 @@ class NormalizationParameters:
     def tensor_std(self) -> torch.Tensor:
         return torch.tensor(self.std)
 
+    @property
+    def log(self):
+        return {"mean": self.tensor_mean, "std": self.tensor_std, "channels": self.channels}
+
+
+def de_normalize(data: torch.Tensor, channels: list[int], mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+    data[:, channels] = data[:, channels].mul(std).add(mean)
+    return data
+
+
+def normalize(data: torch.Tensor, channels: list[int], mean: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+    data[:, channels] = data[:, channels].sub(mean).div(std)
+    return data
+
 
 class Normalize(Augmentation):
     def __init__(
@@ -41,19 +55,15 @@ class Normalize(Augmentation):
             assert getattr(self, f"_{modality}") is not None
 
     def camera(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
-        data[:, self._camera.channels] = (
-            data[:, self._camera.channels].sub(self._camera.tensor_mean).div(self._camera.tensor_std)
-        )
-        return data
+        metadata["augmentations"][str(self)] = {"camera": self._camera.log}
+        return normalize(data, self._camera.channels, self._camera.tensor_mean, self._camera.tensor_std)
 
     def radar(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
         raise NotImplementedError()
 
     def lidar(self, data: torch.Tensor, metadata: Optional[MutableMapping]):
-        data[:, self._lidar.channels] = (
-            data[:, self._lidar.channels].sub(self._lidar.tensor_mean).div(self._lidar.tensor_std)
-        )
-        return data
+        metadata["augmentations"][str(self)] = {"lidar": self._lidar.log}
+        return normalize(data, self._lidar.channels, self._lidar.tensor_mean, self._lidar.tensor_std)
 
     def targets(self, targets: Targets):
         return targets

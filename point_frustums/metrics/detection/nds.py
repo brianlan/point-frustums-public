@@ -1,6 +1,6 @@
 import json
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 import torch
 from torchmetrics import Metric
@@ -38,6 +38,8 @@ class NuScenesDetectionScore(Metric):
         "velocity": {"err_fn": _calc_tp_err_velocity, "attribute": "velocity", "id": "AVE"},
         "attribute": {"err_fn": _calc_tp_err_attribute, "attribute": "attribute", "id": "AAE"},
     }
+    log_metrics = ("NDS", "mAP", "mATE", "mASE", "mAOE", "mAVE", "mAAE")
+    log_per_class_metrics = ("AP", "ATE", "ASE", "AOE", "AVE", "AAE")
 
     def __init__(
         self,
@@ -264,3 +266,44 @@ class NuScenesDetectionScore(Metric):
                 json.dump(collection, f, indent=2)
 
         return collection
+
+    @property
+    def tensorboard_custom_scalars(self) -> dict:
+        layout = {"Metrics": {}}
+
+        for m in self.log_metrics:
+            layout["Metrics"][f"Metric/{m}"] = [
+                "Multiline",
+                [f"Metric/{m}/train", f"Metric/{m}/val", f"Metric/{m}/test"],
+            ]
+
+        class_names = [self.annotations.classes.from_index(i).name for i in range(self.n_classes)]
+        for m in self.log_per_class_metrics:
+            for c in class_names:
+                layout["Metrics"][f"Metric/{m}"] = ["Multiline", [f"Metric/{m}/{c}", f"Metric/{m}/{c}"]]
+
+        return layout
+
+    def log_dict(self, results_dict, mode: Literal["train", "test", "val"]):
+        """
+        Extract the most relevant information from the complete results and format s.t. it can be logged by lightning.
+        :param results_dict:
+        :param mode:
+        :return:
+        """
+
+        output_dict = {f"Metric/{i}/{mode}": results_dict[i] for i in self.log_metrics}
+
+        if mode in ("test", "val"):
+            class_names = [self.annotations.classes.from_index(i).name for i in range(self.n_classes)]
+            for m in self.log_per_class_metrics:
+                for c in class_names:
+                    output_dict[f"Metric/{m}/{c}"] = results_dict["per_class_value"][m][c]
+
+        return output_dict
+
+    # TODO: I need to add a method that can collect all predictions and in the end build a results.json for the NuScenes
+    #  Evaluator on the main worker.
+    # TODO: I want to add a switch that enables a full 3D mode (for target assignment, distance computation, etc.)
+    # TODO: I should add a strict mode that performs on-the-fly filtering (bike-rack, etc.)
+    # TODO: I need to make the orientation error of Traffic Cones only be calculated up to 180°

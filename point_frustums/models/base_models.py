@@ -1,5 +1,5 @@
-from typing import Optional
 from abc import ABCMeta, abstractmethod
+from typing import Optional
 
 from torch import nn, Tensor
 
@@ -22,7 +22,7 @@ class Backbone(nn.Module, metaclass=ABCMeta):
         lidar: dict[str, list[Tensor]],
         camera: Optional[dict[str, Tensor]] = None,
         radar: Optional[dict[str, Tensor]] = None,
-    ) -> tuple[dict[str, Tensor], Optional[dict[str, Tensor]], Optional[dict[str, Tensor]],]:
+    ) -> tuple[dict[str, Tensor], Optional[dict[str, Tensor]], Optional[dict[str, Tensor]]]:
         lidar = {sensor: self.forward_lidar(data) for sensor, data in lidar.items()}
 
         if camera is not None:

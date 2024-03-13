@@ -1,8 +1,10 @@
 from copy import deepcopy
 from math import prod, exp, isclose
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
+import pytorch_lightning.loggers
 import torch
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch import nn, optim
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
@@ -22,6 +24,7 @@ from point_frustums.geometry.rotation_matrix import (
     rotation_matrix_from_rotation_6d,
 )
 from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
+from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
@@ -59,6 +62,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.predictions = predictions
         self.featuremap_parametrization = self.register_featuremap_parametrization()
 
+        self.nds_val = NuScenesDetectionScore(dataset.annotations)
+        self.nds_train = NuScenesDetectionScore(dataset.annotations)
+
     def setup(self, *args, **kwargs):
         # Required to access the dataloader at setup time:
         # https://github.com/Lightning-AI/pytorch-lightning/issues/10430#issuecomment-1487753339
@@ -68,11 +74,16 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             self.setup_logger()
 
     def setup_logger(self):
-        if isinstance(self.logger.experiment, torch.utils.tensorboard.SummaryWriter):  # NOQA
-            losses = {
-                "Losses": {f"Loss/{l}": ["Multiline", [f"Loss/{l}/train", f"Loss/{l}/val"]] for l in self.losses.losses}
-            }
-            self.logger.experiment.add_custom_scalars(losses)  # NOQA
+        for logger in self.loggers:
+            if isinstance(logger, pytorch_lightning.loggers.TensorBoardLogger):
+                losses_ids = self.losses.losses + ["sum"]
+                layout = {
+                    "Losses": {f"Loss/{l}": ["Multiline", [f"Loss/{l}/train", f"Loss/{l}/val"]] for l in losses_ids}
+                }
+                layout.update(self.nds_train.tensorboard_custom_scalars)
+                logger.experiment.add_custom_scalars(layout)
+            elif isinstance(logger, pytorch_lightning.loggers.WandbLogger):
+                logger.experiment.watch(self.model, log_freq=100, log="all")
 
     def evaluate_receptive_fields(self) -> tuple[dict[str, float], dict[str, float]]:
         def get_rf(k: list, s: list) -> int:
@@ -419,11 +430,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         idx = torch.nonzero(binary_pre_mapping).unbind(-1)
 
         # Evaluate pairwise IoU between the matched subset of predictions corresponding targets
-        iou = torch.zeros_like(binary_pre_mapping, dtype=torch.float).index_put_(
-            idx, iou_vol_3d(feat_corners[idx[0], ...], target_corners[idx[1], ...])[0]
-        )
+        iou = torch.zeros_like(binary_pre_mapping, dtype=torch.float)
+        iou[idx] = iou_vol_3d(feat_corners[idx[0], ...], target_corners[idx[1], ...])[0]
         # Initialize the center distance to all zeros
-        center_distance = torch.zeros_like(binary_pre_mapping).float()
+        center_distance = torch.zeros_like(binary_pre_mapping, dtype=torch.float)
         # Calculate the cartesian distances between predictions and mapped targets (prev.: the distance of radius)
         center_distance[idx] = (feat_centers[idx[0], :] - targets.center[idx[1], :]).norm(dim=-1)
         # Normalize the distance by a factor based on the target box size
@@ -434,9 +444,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Broadcast one-hot encoded labels s.t. the first 2 dimensions match the shape of the binary mapping and
         # evaluate the focal loss
-        cost_classification: torch.Tensor = sigmoid_focal_loss(
-            feat_labels[:, None, :].expand(binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)),
-            target_labels[None, :, :].expand(binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)),
+        shape = binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)
+        cost_classification = sigmoid_focal_loss(
+            feat_labels[:, None, :].expand(shape),
+            target_labels[None, :, :].expand(shape),
             reduction="none",
         ).sum(dim=-1)
 
@@ -450,14 +461,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Combine classification/regression and background cost
         cost_classification = cost_classification.tanh()
-        min_fg_cost = cost_classification[binary_pre_mapping].max()
-        cost_classification[~binary_pre_mapping] = torch.clamp(
-            cost_classification[~binary_pre_mapping], min=min_fg_cost + 1e-2
-        )
+        min_fg_cost = cost_classification[binary_pre_mapping].max() + 1e-2
+        cost_classification[~binary_pre_mapping] = cost_classification[~binary_pre_mapping].clamp(min=min_fg_cost)
+
         # Initialize to the bias which ensures that the background is never assigned lower cost than the foreground
         cost = (self.target_assignment.beta + self.target_assignment.gamma) * (~binary_pre_mapping).float()
         # Add the scaled classification cost
-        cost += self.target_assignment.alpha * cost_classification.tanh()
+        cost += self.target_assignment.alpha * cost_classification
         # Add the scaled IoU cost
         cost += self.target_assignment.beta * (1 - iou)
         # Add the scaled center distance cost
@@ -574,7 +584,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         targets_velocity_fg = self._broadcast_targets(targets_velocity, targets_indices_fg)
 
         # Broadcast the ego velocities to match the foreground vector
-        ego_velocities = [v[None, :].repeat(len(i), 1) for i, v in zip(targets_indices_fg, ego_velocities)]
+        ego_velocities = [v[None, :].repeat(i.numel(), 1) for i, v in zip(targets_indices_fg, ego_velocities)]
         ego_velocities = torch.cat(ego_velocities, dim=0)
 
         targets_velocity_fg = self._encode_velocity(targets_velocity_fg, ego_velocities, idx_feat=foreground_idx)
@@ -608,10 +618,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         ],
         targets: list[Targets],
         ego_velocities: list[torch.Tensor],
-    ) -> dict[
-        Literal["class", "attribute", "vfl", "center_radial", "center_angular", "wlh", "orientation", "velocity"],
-        torch.Tensor,
-    ]:
+    ) -> dict[str, torch.Tensor]:
         output = self._flatten_output_channels_last(output=output)
         feat_center_decoded = sph_to_cart_torch(self._decode_center(output["center"]))
         feat_wlh_decoded = self._decode_wlh(output["wlh"])
@@ -734,7 +741,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         Select confident outputs are detections and transform to the coordinate system of the training targets.
         :param output:
         :param ego_velocities:
-        :param sample_ids:
         :return:
         """
         output = self._flatten_output_channels_last(output=output)
@@ -817,30 +823,47 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return batch_detections  # NOQA: Cannot infer return type Tensor in the above lines
 
-    def training_step(self, batch, batch_idx):
-        output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
-        ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
+    def _post_loss(self, step_output, batch, mode: Literal["train", "val"] = "train"):
+        for key, value in step_output["losses"].items():
+            self.log(f"Loss/{key}/{mode}", value, batch_size=len(batch["metadata"]))
 
-        losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
-        loss = self.sum_losses(losses)
-        for key, value in losses.items():
-            self.log(f"Loss/{key}/train", value)
-        self.log("Loss/train", loss)
-        return loss
+    def training_step(self, batch, batch_idx):
+        network_output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
+        # Put the EGO velocity per sample into a list
+        ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
+        # Evaluate the losses and sum
+        losses = self.get_losses(output=network_output, targets=batch.get("targets"), ego_velocities=ego_velocities)
+        losses["sum"] = self.sum_losses(losses)
+        return {"loss": losses["sum"], "losses": losses, "network_output": network_output}
+
+    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int):
+        self._post_loss(step_output=outputs, batch=batch, mode="train")
+        if (batch_idx % self.trainer.log_every_n_steps) == 0:  # NOQA
+            ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
+            # Extract the detections from the network output and decode
+            detections = self.get_detections(output=outputs["network_output"], ego_velocities=ego_velocities)
+            nds = self.nds_train(detections, [t.dict() for t in batch["targets"]])
+            self.log_dict(self.nds_train.log_dict(nds, mode="train"))
 
     def validation_step(self, batch, batch_idx):
-        batch_size = len(batch["metadata"])
-        output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
+        network_output = self.model(lidar=batch.get("lidar"), camera=batch.get("camera"), radar=batch.get("radar"))
+        # Put the EGO velocity per sample into a list
         ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
-        losses = self.get_losses(output=output, targets=batch.get("targets"), ego_velocities=ego_velocities)
-        loss = self.sum_losses(losses)
-        for key, value in losses.items():
-            self.log(f"Loss/{key}/val", value, batch_size=batch_size)
-        self.log("Loss/val", loss, batch_size=batch_size)
+        # Evaluate the losses and sum
+        losses = self.get_losses(output=network_output, targets=batch.get("targets"), ego_velocities=ego_velocities)
+        losses["sum"] = self.sum_losses(losses)
+        detections = self.get_detections(output=network_output, ego_velocities=ego_velocities)
+        self.nds_val.update(batch_detections=detections, batch_targets=[t.dict() for t in batch["targets"]])
+        return {"losses": losses, "detections": detections, "network_output": network_output}
 
-        detections = self.get_detections(output, ego_velocities)
+    def on_validation_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int, dataloader_idx: int = 0):
+        self._post_loss(step_output=outputs, batch=batch, mode="val")
+        # TODO: I might want to store detections in results.json file for the NuScenes Evaluator
+        # TODO: I might want to post some sample detections to tensorboard from time to time
 
-        return loss
+    def on_validation_epoch_end(self) -> None:
+        nds = self.nds_val.compute()
+        self.log_dict(self.nds_val.log_dict(nds, mode="val"), on_epoch=True)
 
     def test_step(self, batch, batch_idx):
         pass

@@ -2,7 +2,6 @@
 requires = ["setuptools>=58.1.0", "wheel", "numpy>=1.24.2", "torch>=2.1.0", "ninja"]
 build-backend = "setuptools.build_meta"
 [tool.black]
-    py36 = true
     line-length = 120
     include = '\.pyi?$'
     exclude = '''
