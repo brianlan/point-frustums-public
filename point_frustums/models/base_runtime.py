@@ -1,19 +1,17 @@
-from typing import Optional
-from collections.abc import MutableMapping
 from abc import ABCMeta, abstractmethod
+from collections.abc import MutableMapping
+from typing import Optional
 
-from torch import Tensor
 from pytorch_lightning import LightningModule
+from torch import Tensor
 
 from point_frustums.models.base_models import Detection3DModel
-from point_frustums.config_dataclasses.dataset import DatasetConfig
 
 
 class Detection3DRuntime(LightningModule, metaclass=ABCMeta):
-    def __init__(self, *args, model: Detection3DModel, dataset: DatasetConfig, **kwargs):
+    def __init__(self, *args, model: Detection3DModel, **kwargs):
         super().__init__(*args, **kwargs)
         self.model = model
-        self.dataset = dataset
 
     def forward(  # pylint: disable=arguments-differ
         self,

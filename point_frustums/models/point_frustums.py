@@ -9,7 +9,7 @@ from torch import nn, optim
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
 
-from point_frustums.config_dataclasses.dataset import DatasetConfig
+from point_frustums.config_dataclasses.dataset import Annotations
 from point_frustums.config_dataclasses.point_frustums import (
     ModelOutputSpecification,
     TargetAssignment,
@@ -48,14 +48,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self,
         *args,
         model: PointFrustumsModel,
-        dataset: DatasetConfig,
         target_assignment: TargetAssignment,
         losses: Losses,
         predictions: Predictions,
         logging: Logging,
         **kwargs,
     ):
-        super().__init__(*args, model=model, dataset=dataset, **kwargs)
+        super().__init__(*args, model=model, **kwargs)
         self.discretization = deepcopy(self.model.backbone.lidar.discretize)
         self.strides = deepcopy(self.model.neck.fpn.strides)
         self.fpn_layers = deepcopy(self.model.neck.fpn.layers)
@@ -64,20 +63,32 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.losses = losses
         self.predictions = predictions
         self.logging = logging
-        self.featuremap_parametrization = self.register_featuremap_parametrization()
+        self.featuremap_parametrization = self._register_featuremap_parametrization()
 
-        self.nds_val = NuScenesDetectionScore(dataset.annotations)
-        self.nds_train = NuScenesDetectionScore(dataset.annotations)
+        self.nds_train: Optional[NuScenesDetectionScore] = None
+        self.nds_val: Optional[NuScenesDetectionScore] = None
+        self._annotations = None
 
     def setup(self, *args, **kwargs):
         # Required to access the dataloader at setup time:
         # https://github.com/Lightning-AI/pytorch-lightning/issues/10430#issuecomment-1487753339
         self.trainer.fit_loop.setup_data()
-
+        self.nds_val = NuScenesDetectionScore(self.annotations)
+        self.nds_train = NuScenesDetectionScore(self.annotations)
         if bool(self.trainer.fast_dev_run) is False:  # NOQA
-            self.setup_logger()
+            self._setup_logger()
 
-    def setup_logger(self):
+    @property
+    def annotations(self) -> Annotations:
+        """
+        Access the Annotations config class of the (NuScenes) DataModules dataset object.
+        :return:
+        """
+        if self._annotations is None:
+            self._annotations = self.trainer.datamodule.dataset.annotations  # NOQA: Unresolved attribute reference...
+        return self._annotations
+
+    def _setup_logger(self):
         for logger in self.loggers:
             if isinstance(logger, pytorch_lightning.loggers.TensorBoardLogger):
                 losses_ids = self.losses.losses + ["sum"]
@@ -89,7 +100,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             elif isinstance(logger, pytorch_lightning.loggers.WandbLogger):
                 logger.experiment.watch(self.model, log_freq=100, log="all")
 
-    def evaluate_receptive_fields(self) -> tuple[dict[str, float], dict[str, float]]:
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        checkpoint["Annotations"] = self.annotations.serialize()
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        self._annotations = Annotations(**checkpoint["Annotations"])
+
+    def _evaluate_receptive_fields(self) -> tuple[dict[str, float], dict[str, float]]:
         def get_rf(k: list, s: list) -> int:
             """
             https://distill.pub/2019/computing-receptive-fields/#other-network-operations
@@ -156,7 +173,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return receptive_fields_pol, receptive_fields_azi
 
-    def register_featuremap_parametrization(self) -> ModelOutputSpecification:
+    def _register_featuremap_parametrization(self) -> ModelOutputSpecification:
         """
         Register the parameter-set that describe the geometric relation between feature vectors and spherical
         coordinates. They are used to map targets to the feature map and predictions back.
@@ -178,7 +195,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         :return:
         """
-        layers_rfs_pol, layers_rfs_azi = self.evaluate_receptive_fields()
+        layers_rfs_pol, layers_rfs_azi = self._evaluate_receptive_fields()
         layers_rfs = list(zip(layers_rfs_pol.values(), layers_rfs_azi.values()))
         reference_boxes_centered = 0.5 * torch.tensor(layers_rfs).repeat(1, 2) * torch.tensor([-1, -1, 1, 1])
 
@@ -389,7 +406,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         x = rotate_2d(phi=phi, x=x)
         return x + ego_velocity[..., [0, 1]]
 
-    def assign_target_index_to_features(
+    def _assign_target_index_to_features(
         self,
         targets: Targets,
         target_labels: torch.Tensor,
@@ -448,7 +465,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Broadcast one-hot encoded labels s.t. the first 2 dimensions match the shape of the binary mapping and
         # evaluate the focal loss
-        shape = binary_pre_mapping.shape + (self.dataset.annotations.n_classes,)
+        shape = binary_pre_mapping.shape + (self.annotations.n_classes,)
         cost_classification = sigmoid_focal_loss(
             feat_labels[:, None, :].expand(shape),
             target_labels[None, :, :].expand(shape),
@@ -643,9 +660,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         for i in range(output["class"].shape[0]):
             # Assign the index of a target/the background to each prediction
             with torch.no_grad():
-                target_labels = self._one_hot(targets[i].label, self.dataset.annotations.n_classes)
+                target_labels = self._one_hot(targets[i].label, self.annotations.n_classes)
                 target_corners = get_corners_3d(targets[i].center, targets[i].wlh, targets[i].orientation)
-                index = self.assign_target_index_to_features(
+                index = self._assign_target_index_to_features(
                     targets=targets[i],
                     target_labels=target_labels,
                     target_corners=target_corners,
@@ -662,7 +679,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             target_labels = target_labels[index, :]
             target_labels[~fg, :] = 0
             targets_label.append(target_labels)
-            targets_attribute.append(self._one_hot(targets[i].attribute, self.dataset.annotations.n_attributes, index))
+            targets_attribute.append(self._one_hot(targets[i].attribute, self.annotations.n_attributes, index))
             iou = torch.zeros_like(index, dtype=torch.float)
             iou[fg] = iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0]
             # Take the one-hot encoded and broadcasted target labels from this sample and scale with the IoU
@@ -853,7 +870,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                     augmentations_log=batch["metadata"][i].get("augmentations", {}),
                     targets=batch.get("targets")[i].dict(),
                     detections=detections[i],
-                    label_enum=self.dataset.annotations.classes,
+                    label_enum=self.annotations.classes,
                     tag=tag,
                     step=self.global_step,
                 )
@@ -901,7 +918,6 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             logging_frequency=self.logging.frequency_log_val_sample,
             prefix="Val",
         )
-        # TODO: I might want to store detections in results.json file for the NuScenes Evaluator
 
     def on_validation_epoch_end(self) -> None:
         nds = self.nds_val.compute()

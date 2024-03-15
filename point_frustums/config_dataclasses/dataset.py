@@ -1,7 +1,6 @@
-from dataclasses import dataclass
-from enum import Enum
 from collections.abc import Sequence
-
+from dataclasses import dataclass, asdict
+from enum import Enum
 from functools import cached_property
 from itertools import chain
 from typing import Literal, Optional
@@ -26,6 +25,13 @@ class Annotations:
     alias_to_class: dict[str, str]
     alias_to_category: dict[str, str]
     category_to_attributes: dict[str, list]
+
+    def serialize(self):
+        """
+        Return the serial representation that was used to initialize the dataclass.
+        :return:
+        """
+        return asdict(self)
 
     @cached_property
     def classes(self) -> Labels:
