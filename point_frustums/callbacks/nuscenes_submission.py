@@ -14,12 +14,8 @@ from typing_extensions import override
 
 from point_frustums.config_dataclasses.dataset import Annotations
 from point_frustums.dataloaders.nuscenes import NuScenes
-from point_frustums.geometry.quaternion import (
-    apply_quaternion_to_vector,
-    apply_quaternion_to_quaternion,
-    apply_quaternion_to_2d_vector,
-    quaternion_from_rotation_matrix,
-)
+from point_frustums.geometry.boxes import transform_boxes
+from point_frustums.geometry.quaternion import quaternion_from_rotation_matrix
 
 
 async def retrieve_boxes(
@@ -98,25 +94,6 @@ def postprocess_boxes(boxes: dict[str, torch.Tensor], sample_token: str, annotat
         )
 
     return boxes_list
-
-
-def transform_boxes(
-    boxes: dict[str, torch.Tensor], rotation: list[float], translation: list[float]
-) -> dict[str, torch.Tensor]:
-    """
-    Apply transformation to the boxes {center, orientation, velocity}.
-    :param boxes:
-    :param rotation:
-    :param translation:
-    :return:
-    """
-    device, dtype = boxes["center"].device, boxes["center"].dtype
-    rotation = torch.tensor(rotation, device=device, dtype=dtype)[None, :]
-    translation = torch.tensor(translation, device=device, dtype=dtype)[None, :]
-    boxes["center"] = apply_quaternion_to_vector(q=rotation, x=boxes["center"]) + translation
-    boxes["orientation"] = apply_quaternion_to_quaternion(rotation, boxes["orientation"])
-    boxes["velocity"] = apply_quaternion_to_2d_vector(q=rotation, x=boxes["velocity"])
-    return boxes
 
 
 def parse_sample_detections(
@@ -199,7 +176,7 @@ class CreateNuScenesSubmission(Callback):
         self.on_batch_end(outputs["detections"], metadata=batch["metadata"], annotations=pl_module.annotations)
 
     def on_epoch_end(self, trainer, dataset: NuScenes):
-        if trainer.sanity_checking:
+        if trainer.sanity_checking or bool(trainer.fast_dev_run):
             self.store = None
             return
 

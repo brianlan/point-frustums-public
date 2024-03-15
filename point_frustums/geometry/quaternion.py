@@ -1,5 +1,5 @@
 import torch
-from .utils import angle_to_neg_pi_to_pi
+
 from .rotation_conversion import (
     _spherical_coordinates_to_quaternion,
     _rotation_matrix_to_quaternion,
@@ -7,6 +7,17 @@ from .rotation_conversion import (
     _axis_angle_to_quaternion,
     _quaternion_to_axis_angle,
 )
+from .utils import angle_to_neg_pi_to_pi
+
+
+###############################
+# BASIC QUATERNION OPERATIONS #
+###############################
+
+
+def invert_quaternion(q: torch.Tensor) -> torch.Tensor:
+    q[..., 1:] *= -1
+    return q
 
 
 ############################

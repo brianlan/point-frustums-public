@@ -20,8 +20,10 @@ from torchvision.io import read_image
 from point_frustums import ROOT_DIR
 from point_frustums.augmentations import Augmentation, RandomAugmentation
 from point_frustums.config_dataclasses.dataset import DatasetConfig, Sensor
-from point_frustums.utils.environment_helpers import data_root_getter
+from point_frustums.geometry.boxes import transform_boxes
+from point_frustums.geometry.quaternion import quaternion_to_rotation_matrix
 from point_frustums.geometry.utils import cart_to_sph_numpy
+from point_frustums.utils.environment_helpers import data_root_getter
 from point_frustums.utils.targets import Targets
 
 VISIBILITY_LEVELS = {
@@ -105,7 +107,11 @@ class NuScenes(Dataset):
 
         # Initialize the return dict and add the sensor independent metadata
         data = Sample().as_dict()
-        data["metadata"] = {"sample_token": sample_token, **self.get_sample_meta(scene=scene, sample=sample)}
+        data["metadata"] = {
+            "sample_token": sample_token,
+            "sample_index": i,
+            **self.get_sample_meta(scene=scene, sample=sample),
+        }
 
         # Get all sensor dependent (meta-)data
         for sensor, specifications in self.dataset.sensors.items():
@@ -209,13 +215,6 @@ class NuScenes(Dataset):
             # Add velocity information
             box.velocity = self.db.box_velocity(box.token)
 
-            # Move box to ego vehicle coord system.
-            box.translate(-np.array(ego["translation"]))
-            box.rotate(Quaternion(ego["rotation"]).inverse)
-            #  Move box to sensor coord system.
-            box.translate(-np.array(sensor["translation"]))
-            box.rotate(Quaternion(sensor["rotation"]).inverse)
-
             # Get the attributes
             if len(sample_annotation["attribute_tokens"]) == 0:
                 # The object has no attributes (traffic cone, barrier, etc.)
@@ -231,7 +230,7 @@ class NuScenes(Dataset):
             boxes_stacked["label"].append(label.value)
             boxes_stacked["wlh"].append(box.wlh)
             boxes_stacked["center"].append(box.center)
-            boxes_stacked["orientation"].append(box.rotation_matrix)
+            boxes_stacked["orientation"].append(box.orientation.q)
             boxes_stacked["attribute"].append(attribute.value)
             boxes_stacked["velocity"].append(box.velocity)
 
@@ -245,6 +244,23 @@ class NuScenes(Dataset):
                 dtype = dtype if (dtype := value[0].dtype) != np.float64 else np.float32
                 # Stack and convert to torch.Tensor
                 boxes_stacked[key] = torch.from_numpy(np.stack(value, axis=0, dtype=dtype))
+
+        # Transform boxes (see nuscenes.nuscenes.get_sample_data)
+        # First, transform from the global to the EGO coos (transformation parameters are in the EGO coos)
+        translate_global_to_ego = [-x for x in ego["translation"]]
+        rotate_global_to_ego = [x if i == 0 else -x for i, x in enumerate(ego["rotation"])]
+        boxes_stacked = transform_boxes(
+            boxes_stacked, rotation=rotate_global_to_ego, translation=translate_global_to_ego, rotate_first=False
+        )
+        # Second, transform from the EGO to the sensor coos (transformation parameters are in the sensor coos)
+        translate_ego_to_sensor = [-x for x in sensor["translation"]]
+        rotate_ego_to_sensor = [x if i == 0 else -x for i, x in enumerate(sensor["rotation"])]
+        boxes_stacked = transform_boxes(
+            boxes_stacked, rotation=rotate_ego_to_sensor, translation=translate_ego_to_sensor, rotate_first=False
+        )
+
+        # Convert orientation to matrix representation
+        boxes_stacked["orientation"] = quaternion_to_rotation_matrix(boxes_stacked["orientation"])
 
         return Targets(**boxes_stacked), metadata
 
@@ -659,7 +675,7 @@ class NuScenesDataModule(LightningDataModule):
 
     def test_dataloader(self):
         """
-        The test dataloader can only be used for actial testing by the NuScenes team as they do not provide the
+        The test dataloader can only be used for actual testing by the NuScenes team as they do not provide the
         annotations.
         """
         dataset = NuScenes(
