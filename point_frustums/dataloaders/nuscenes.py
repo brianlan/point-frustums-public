@@ -175,6 +175,17 @@ class NuScenes(Dataset):
             raise NotImplementedError("For now, only 'camera' and 'lidar' data is supported.")
         return data
 
+    @staticmethod
+    def _translation_rotation(pose: dict, invert: bool = False) -> dict[Literal["rotation", "translation"], list]:
+        translation = pose["translation"]
+        rotation = pose["rotation"]
+
+        if invert:
+            translation = [-x for x in translation]
+            rotation = [x if i == 0 else -x for i, x in enumerate(rotation)]
+
+        return {"translation": translation, "rotation": rotation}
+
     def get_targets(  # pylint: disable=too-many-locals
         self,
         sample: Mapping,
@@ -187,6 +198,9 @@ class NuScenes(Dataset):
         :param sensor:
         :return:
         """
+        if sensor == "EGO":
+            # Use LIDAR_TOP as proxy sensor if annotations are to be loaded in EGO coos. Required to use the devkit API.
+            sensor = "LIDAR_TOP"
         data_token = sample["data"][sensor]
         # Retrieve sensor & pose records
         sample_data = self.db.get("sample_data", data_token)
@@ -199,8 +213,9 @@ class NuScenes(Dataset):
         # Make list of Box objects including coord system transforms.
         boxes_stacked = {"wlh": [], "center": [], "orientation": [], "velocity": [], "label": [], "attribute": []}
 
-        # Retrieve and iterate all sample annotations and map to sensor coordinate system.
         for box in self.db.get_boxes(data_token):
+            # sample["anns"] contains the same box.tokens as returned by get_boxes but the latter also interpolates
+            # boxes for intermediate frames.
             sample_annotation = self.db.get("sample_annotation", box.token)
 
             label = self.dataset.annotations.retrieve_class(box.name)
@@ -245,19 +260,16 @@ class NuScenes(Dataset):
                 # Stack and convert to torch.Tensor
                 boxes_stacked[key] = torch.from_numpy(np.stack(value, axis=0, dtype=dtype))
 
-        # Transform boxes (see nuscenes.nuscenes.get_sample_data)
-        # First, transform from the global to the EGO coos (transformation parameters are in the EGO coos)
-        translate_global_to_ego = [-x for x in ego["translation"]]
-        rotate_global_to_ego = [x if i == 0 else -x for i, x in enumerate(ego["rotation"])]
+        # Transform global -> EGO coos (parameters are in the EGO coos; reference: nuscenes.nuscenes.get_sample_data)
         boxes_stacked = transform_boxes(
-            boxes_stacked, rotation=rotate_global_to_ego, translation=translate_global_to_ego, rotate_first=False
+            boxes_stacked, **self._translation_rotation(ego, invert=True), rotate_first=False
         )
-        # Second, transform from the EGO to the sensor coos (transformation parameters are in the sensor coos)
-        translate_ego_to_sensor = [-x for x in sensor["translation"]]
-        rotate_ego_to_sensor = [x if i == 0 else -x for i, x in enumerate(sensor["rotation"])]
-        boxes_stacked = transform_boxes(
-            boxes_stacked, rotation=rotate_ego_to_sensor, translation=translate_ego_to_sensor, rotate_first=False
-        )
+
+        if self.dataset.annotations.coos != "EGO":
+            # Transform from the EGO to the sensor coos (transformation parameters are in the sensor coos)
+            boxes_stacked = transform_boxes(
+                boxes_stacked, **self._translation_rotation(sensor, invert=True), rotate_first=False
+            )
 
         # Convert orientation to matrix representation
         boxes_stacked["orientation"] = quaternion_to_rotation_matrix(boxes_stacked["orientation"])
@@ -311,7 +323,8 @@ class NuScenes(Dataset):
         If everything of the above fails, return an unphysical downward velocity of 1m/s.
         :param scene:
         :param sample:
-        :param proxy_sensor:
+        :param proxy_sensor: An arbitrary sensor, used to retrieve 2 consecutive samples if the velocity cannot be
+            loaded from CAN data.
         :return:
         """
         velocity = None
@@ -379,8 +392,8 @@ class NuScenes(Dataset):
                 # Load the inverse rotation between the calibrated sensor and the EGO vehicle as Quaternion
                 rotation = Quaternion(calibrated_sensor_data["rotation"]).inverse
                 # Transform to the COOS of the annotations
-                velocity = torch.from_numpy(rotation.inverse.rotate(velocity).astype(np.float32))
-            meta["velocity"] = velocity
+                velocity = rotation.inverse.rotate(velocity).astype(np.float32)
+            meta["velocity"] = torch.from_numpy(velocity)
 
         return meta
 
@@ -496,6 +509,13 @@ class NuScenes(Dataset):
             sample_data = self.db.get("sample_data", sample_data_token)
 
         sweeps = np.concatenate(sweeps, axis=1).T
+
+        if self.dataset.annotations.coos == "EGO":
+            sample_data = self.db.get("sample_data", ref_sample_data_token)
+            sensor = self.db.get("calibrated_sensor", sample_data["calibrated_sensor_token"])
+            sensor2ego = transform_matrix(sensor["translation"], Quaternion(sensor["rotation"]), inverse=False)
+            sweeps_padded = np.concatenate([sweeps[:, :3], np.ones((sweeps.shape[0], 1))], axis=1)
+            sweeps[:, :3] = np.einsum("ij,kj->ki", sensor2ego, sweeps_padded)[:, :3]
 
         sweeps = np.concatenate((sweeps, cart_to_sph_numpy(sweeps[:, :3])), axis=1)
 
