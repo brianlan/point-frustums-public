@@ -8,7 +8,10 @@ trainer:
   accumulate_grad_batches: 5
   gradient_clip_val: 10
   gradient_clip_algorithm: norm
-  callbacks: [ LearningRateMonitor, RichProgressBar, point_frustums.callbacks.CreateNuScenesSubmission ]
+  callbacks:
+    - LearningRateMonitor
+    - RichProgressBar
+    - point_frustums.callbacks.CreateNuScenesSubmission
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
@@ -17,4 +20,4 @@ trainer:
       init_args:
         project: point_frustums
         save_dir: training_logs
-        offline: True
+        offline: False

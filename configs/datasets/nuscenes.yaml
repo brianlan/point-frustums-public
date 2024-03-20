@@ -96,8 +96,8 @@ init_args:
           polar: 900
           azimuthal: 1600
     annotations:
-      coos: LIDAR_TOP
-      visibility: 0
+      coos: EGO
+      visibility: 45
       class_aliases: [ pedestrian, car, bus, bicycle, truck, trailer, construction_vehicle, traffic_cone, barrier, motorcycle ]
       alias_to_class:
         pedestrian: human.pedestrian

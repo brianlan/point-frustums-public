@@ -14,7 +14,7 @@ init_args:
                 n_splits_azi: 360
                 n_splits_pol: 40
                 fov_azi_deg: [-180, 180]
-                fov_pol_deg: [80, 120]
+                fov_pol_deg: [60, 100]
               decorate:
                 functions:
                   - { id: relative_angle, channel: azimuthal, std: 0.289 }
