@@ -1,0 +1,11 @@
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval01_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval02_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval03_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval04_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval05_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval06_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval07_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval08_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval09_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-trainval10_blobs_lidar.tgz
+https://motional-nuscenes.s3.amazonaws.com/public/v1.0/v1.0-test_blobs_lidar.tgz
