@@ -3,10 +3,10 @@ model: ./models/point_frustums.yaml
 
 trainer:
   default_root_dir: training
-  max_epochs: 1
-  log_every_n_steps: 2
+  max_epochs: 24
+  log_every_n_steps: 10
   accumulate_grad_batches: 5
-  gradient_clip_val: 10
+  gradient_clip_val: 50
   gradient_clip_algorithm: norm
   callbacks:
     - LearningRateMonitor

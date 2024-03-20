@@ -38,21 +38,21 @@ init_args:
             class_path: point_frustums.models.necks.spherical_coos_fpn.FPN
             init_args:
               n_channels_in: 32
-              n_channels_out: 64
+              n_channels_out: 128
               layers:
                 l0: {n_blocks: 2, n_channels: 32, downsampling_horizontal: False, downsampling_vertical: False}
                 l1: {n_blocks: 4, n_channels: 64, downsampling_horizontal: True, downsampling_vertical: True}
-                l2: {n_blocks: 2, n_channels: 64, downsampling_horizontal: True, downsampling_vertical: True}
-                l3: {n_blocks: 1, n_channels: 64, downsampling_horizontal: True, downsampling_vertical: True}
-              #extra_layers:
-              #  p4: {downsampling_horizontal: True, downsampling_vertical: False}
+                l2: {n_blocks: 4, n_channels: 128, downsampling_horizontal: True, downsampling_vertical: True}
+                l3: {n_blocks: 2, n_channels: 128, downsampling_horizontal: True, downsampling_vertical: True}
+              extra_layers:
+                p4: {downsampling_horizontal: True, downsampling_vertical: False}
               upsampling_mode: nearest
               dropout: 0.5
       head:
         class_path: point_frustums.models.heads.PointFrustumsHead
         init_args:
-          n_channels_in: 64
-          layers_in: [l0, l1, l2, l3]
+          n_channels_in: 128
+          layers_in: [l0, l1, l2, l3, p4]
           n_classes: 10
           n_attributes: 8
           n_convolutions_classification: 4
@@ -68,7 +68,7 @@ init_args:
     label:
       weight: 2
     center_radial:
-      weight: 2
+      weight: 1
       kwargs:
         beta: 0.2
     center_angular:
@@ -76,20 +76,20 @@ init_args:
       kwargs:
         beta: 0.5
     orientation:
-      weight: 2
+      weight: 1
       kwargs:
         beta: 0.1
     velocity:
       active: True
-      weight: 1.0
+      weight: 0.5
     vfl:
-      active: False
+      active: True
       weight: 0.5
     attribute:
       active: True
-      weight: 1
+      weight: 0.8
   predictions:
-    score_vfl_factor: 0.0
+    score_vfl_factor: 0.3
   logging:
-    frequency_log_train_sample: 100
-    frequency_log_val_sample: 20
+    frequency_log_train_sample: 200
+    frequency_log_val_sample: 50
