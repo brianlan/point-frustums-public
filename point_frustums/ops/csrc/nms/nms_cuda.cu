@@ -95,7 +95,7 @@ __global__ void NMSDuplicateKernel(
 
   // Evaluate the scaled center distance; return early if the (lower) threshold
   // is exceeded.
-  if ((norm(*box_i_parameters->center - *box_j_parameters->center) / box_i_parameters->volume) > distance_threshold) {
+  if ((norm(box_i_parameters->center - box_j_parameters->center) / box_i_parameters->volume) > distance_threshold) {
     return;
   }
 
