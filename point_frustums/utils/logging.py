@@ -18,6 +18,7 @@ def log_pointcloud(
     augmentations_log: Optional[dict] = None,
     tag: str = "",
     step: int = 0,
+    lower_z_threshold: float = 0.0,
 ):
     if isinstance(augmentations_log, dict):
         pc_normalization = augmentations_log.get("Normalize", {}).get("lidar")
@@ -30,5 +31,12 @@ def log_pointcloud(
         logger.experiment.add_figure(tag, fig, step)
     elif isinstance(logger, WandbLogger):
         plot_pointcloud_wandb(
-            logger, points=data, targets=targets, detections=detections, tag=tag, step=step, label_enum=label_enum
+            logger,
+            points=data,
+            targets=targets,
+            detections=detections,
+            tag=tag,
+            step=step,
+            label_enum=label_enum,
+            lower_z_threshold=lower_z_threshold,
         )

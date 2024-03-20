@@ -857,10 +857,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         else:
             prefix = ""
 
+        lower_z_threshold = 0.0
+        if self.annotations.coos == "EGO":
+            lower_z_threshold = 0.1
+
         batch_size = len(batch["metadata"])
         for i in range(batch_size):
             if random.random() > (1 / logging_frequency):
                 continue
+
+            if self.annotations.coos == "LIDAR_TOP":
+                lower_z_threshold = 0.1 - batch["metadata"][i]["LIDAR_TOP"]["translation"][-1]
 
             tag = prefix + "Sample: " + batch["metadata"][i]["sample_token"]
             for logger in self.loggers:
@@ -873,6 +880,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                     label_enum=self.annotations.classes,
                     tag=tag,
                     step=self.global_step,
+                    lower_z_threshold=lower_z_threshold,
                 )
 
     TRAIN_STEP_OUTPUT = dict[Literal["loss", "losses", "network_output"], Any]

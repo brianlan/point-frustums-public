@@ -152,6 +152,7 @@ def plot_pointcloud_wandb(
     ego_velocity: Optional[torch.Tensor] = None,
     detections: Optional[dict[str, torch.Tensor]] = None,
     label_enum: Optional[Labels] = None,
+    lower_z_threshold: float = 0.1,
 ):
     boxes = []
     velocities = []
@@ -177,7 +178,7 @@ def plot_pointcloud_wandb(
 
     boxes = np.array(boxes)
     velocities = np.array(velocities)
-    mask = (points[:, 2] > -1.6) * (points[:, 2] < 5)
+    mask = points[:, 2] >= lower_z_threshold
     points = points[mask, :]
     intensity_rgb = colormaps["plasma"](points[:, 3].numpy() / 255)[:, :3] * 255
     points = np.concatenate((points[:, :3].numpy(), intensity_rgb), axis=1)
