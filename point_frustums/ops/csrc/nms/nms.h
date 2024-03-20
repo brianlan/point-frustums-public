@@ -5,6 +5,7 @@
 #pragma once
 #include "utils/pytorch3d_cutils.h"
 #include <torch/extension.h>
+#include "utils/pytorch3d_cutils.h"
 
 // CPU implementation
 at::Tensor NMSCpu(const at::Tensor &labels, const at::Tensor &scores, const at::Tensor &boxes,
@@ -22,7 +23,7 @@ inline at::Tensor NMS(const at::Tensor &labels, const at::Tensor &scores, const 
     CHECK_CUDA(labels);
     CHECK_CUDA(scores);
     CHECK_CUDA(boxes);
-    return NMSCUDA(labels.contiguous(), scores.contiguous(), boxes.contiguous(), iou_threshold, distance_threshold);
+    return NMSCuda(labels.contiguous(), scores.contiguous(), boxes.contiguous(), iou_threshold, distance_threshold);
 #else
     AT_ERROR("Not compiled with GPU support.");
 #endif

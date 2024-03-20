@@ -2,6 +2,7 @@
 // Created by Enrico Stauss on 19.01.24.
 //
 #include "iou_box3d/iou_utils.cuh"
+#include "nms/nms_utils.cuh"
 #include "utils/float_math.cuh"
 #include <math.h>
 #include <ATen/ATen.h>
@@ -31,45 +32,36 @@
 // removed.
 
 template <typename T>
-__global__ void BoxesMetaKernel(const at::PackedTensorAccessor32<T, 3, at::RestrictPtrTraits> boxes,
-                                at::PackedTensorAccessor32<T, 2, at::RestrictPtrTraits> boxes_center,
-                                at::PackedTensorAccessor32<T, 4, at::RestrictPtrTraits> boxes_triangles,
-                                at::PackedTensorAccessor32<T, 4, at::RestrictPtrTraits> boxes_planes,
-                                at::PackedTensorAccessor32<T, 1, at::RestrictPtrTraits> boxes_volume) {
+__global__ void BoxesMetaKernel(
+    const at::PackedTensorAccessor32<T, 3, at::RestrictPtrTraits> boxes,
+    at::PackedTensorAccessor32<T, 2, at::RestrictPtrTraits> boxes_parameters
+) {
   const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= boxes.size(0)) {
     return; // Return early if index is out of bounds
   }
 
   // Reinterpret the underlying memory in the adequate types
-  float3 *box_center = reinterpret_cast<float3 *>(boxes_center[tid].data());
-  FaceVerts *box_tris = reinterpret_cast<FaceVerts *>(boxes_triangles[tid].data());
-  FaceVerts *box_planes = reinterpret_cast<FaceVerts *>(boxes_planes[tid].data());
+  BoxParameters *box_parameters = reinterpret_cast<BoxParameters *>(boxes_parameters[tid].data());
 
-  // Evaluate and write {center [N, 3], tris [N, NUM_TRIS, 4, 3], planes [N, 4,
-  // 3], volume [N,]} Evaluate the box center (float3) and write to the
-  // pre-allocated tensor elements.
-  *box_center = BoxCenter(boxes[tid]);
-  // Evaluate and directly write the box tris (float: [4, 3]) into the
-  // pre-allocated tensor elements.
-  GetBoxTris(boxes[tid], box_tris);
-  // Evaluate and directly write the box planes (float: [4, 3])  into the
-  // pre-allocated tensor elements.
-  GetBoxPlanes(boxes[tid], box_planes);
-  // Evaluate the box volume (float) and write to the pre-allocated tensor
-  // element.
-  boxes_volume[tid] = BoxVolume(box_tris, *box_center, NUM_TRIS);
+  // Evaluate and write {center [N, 3], tris [N, NUM_TRIS, 4, 3], planes [N, 4, 3], volume [N,]}.
+  // Evaluate the box center (float3) and write to the pre-allocated tensor elements.
+  box_parameters->center = BoxCenter(boxes[tid]);
+  // Evaluate and directly write the box tris (float: [4, 3]) into the pre-allocated tensor elements.
+  GetBoxTris(boxes[tid], box_parameters->triangles);
+  // Evaluate and directly write the box planes (float: [4, 3]) into the pre-allocated tensor elements.
+  GetBoxPlanes(boxes[tid], box_parameters->planes);
+  // Evaluate the box volume (float) and write to the pre-allocated tensor element.
+  box_parameters->volume = BoxVolume(box_parameters->triangles, box_parameters->center, NUM_TRIS);
 }
 
 template <typename T>
-__global__ void NMSDuplicateKernel(const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> boxes_label,
-                                   const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> boxes_sort_idx,
-                                   const at::PackedTensorAccessor32<T, 2, at::RestrictPtrTraits> boxes_center,
-                                   const at::PackedTensorAccessor32<T, 4, at::RestrictPtrTraits> boxes_triangles,
-                                   const at::PackedTensorAccessor32<T, 4, at::RestrictPtrTraits> boxes_planes,
-                                   const at::PackedTensorAccessor32<T, 1, at::RestrictPtrTraits> boxes_volume,
-                                   double iou_threshold, double distance_threshold,
-                                   at::PackedTensorAccessor32<int, 2, at::RestrictPtrTraits> duplicate_count) {
+__global__ void NMSDuplicateKernel(
+    const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> boxes_label,
+    const at::PackedTensorAccessor32<int, 1, at::RestrictPtrTraits> boxes_sort_idx,
+    const at::PackedTensorAccessor32<T, 2, at::RestrictPtrTraits> boxes_parameters, double iou_threshold,
+    double distance_threshold, at::PackedTensorAccessor32<int, 2, at::RestrictPtrTraits> duplicate_count
+) {
 
   // Parallelize over all possible combinations by executing a 2D grid
   const int tid_i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -98,24 +90,20 @@ __global__ void NMSDuplicateKernel(const at::PackedTensorAccessor32<int, 1, at::
 
   // From here on, I will need to access the raw data of center, tris, planes
   // and volume Reinterpret the underlying memory in the adequate types
-  const float3 *box_i_center = reinterpret_cast<const float3 *>(boxes_center[i].data());
-  const FaceVerts *box_i_tris = reinterpret_cast<const FaceVerts *>(boxes_triangles[i].data());
-  const FaceVerts *box_i_planes = reinterpret_cast<const FaceVerts *>(boxes_planes[i].data());
-
-  const float3 *box_j_center = reinterpret_cast<const float3 *>(boxes_center[j].data());
-  const FaceVerts *box_j_tris = reinterpret_cast<const FaceVerts *>(boxes_triangles[j].data());
-  const FaceVerts *box_j_planes = reinterpret_cast<const FaceVerts *>(boxes_planes[j].data());
+  const BoxParameters *box_i_parameters = reinterpret_cast<BoxParameters *>(boxes_parameters[i].data());
+  const BoxParameters *box_j_parameters = reinterpret_cast<BoxParameters *>(boxes_parameters[j].data());
 
   // Evaluate the scaled center distance; return early if the (lower) threshold
   // is exceeded.
-  if ((norm(*box_i_center - *box_j_center) / boxes_volume[i]) > distance_threshold) {
+  if ((norm(box_i_parameters->center - box_j_parameters->center) / box_i_parameters->volume) > distance_threshold) {
     return;
   }
 
   // Evaluate the IoU between box i and j.
-  thrust::tuple<float, float> result =
-      GetIntersectionAndUnion(*box_i_center, *box_j_center, box_i_tris, box_j_tris, box_i_planes, box_j_planes,
-                              boxes_volume[i], boxes_volume[j]);
+  thrust::tuple<float, float> result = GetIntersectionAndUnion(
+      box_i_parameters->center, box_j_parameters->center, box_i_parameters->triangles, box_j_parameters->triangles,
+      box_i_parameters->planes, box_j_parameters->planes, box_i_parameters->volume, box_j_parameters->volume
+  );
   const float iou = thrust::get<1>(result);
   // Increment the count for box i by 1 if the IoU between boxes i and j exceeds
   // the threshold.
@@ -124,8 +112,10 @@ __global__ void NMSDuplicateKernel(const at::PackedTensorAccessor32<int, 1, at::
   }
 }
 
-at::Tensor NMSCuda(const at::Tensor &labels, const at::Tensor &scores, const at::Tensor &boxes,
-                   const double iou_threshold, const double distance_threshold) {
+at::Tensor NMSCuda(
+    const at::Tensor &labels, const at::Tensor &scores, const at::Tensor &boxes, const double iou_threshold,
+    const double distance_threshold
+) {
 
   // Check inputs are on the same device
   at::TensorArg labels_t{labels, "labels", 1}, scores_t{scores, "scores", 2}, boxes_t{boxes, "boxes", 3};
@@ -151,15 +141,11 @@ at::Tensor NMSCuda(const at::Tensor &labels, const at::Tensor &scores, const at:
 
   // 1. Evaluate center, tris, planes and volume of all boxes
   auto options_float = boxes.options().dtype(at::kFloat);
-  auto boxes_center = at::empty({N_BOXES, 3}, options_float);
-  auto boxes_triangles = at::empty({N_BOXES, NUM_TRIS, 4, 3}, options_float);
-  auto boxes_planes = at::empty({N_BOXES, NUM_PLANES, 4, 3}, options_float);
-  auto boxes_volume = at::empty({N_BOXES}, options_float);
-  BoxesMetaKernel<<<blocks, threads, 0, stream>>>(boxes.packed_accessor32<float, 3, at::RestrictPtrTraits>(),
-                                                  boxes_center.packed_accessor32<float, 2, at::RestrictPtrTraits>(),
-                                                  boxes_triangles.packed_accessor32<float, 4, at::RestrictPtrTraits>(),
-                                                  boxes_planes.packed_accessor32<float, 4, at::RestrictPtrTraits>(),
-                                                  boxes_volume.packed_accessor32<float, 1, at::RestrictPtrTraits>());
+  auto boxes_parameters = at::empty({N_BOXES, 3 + N_FLOATS_PER_TRIANGLE + N_FLOATS_PER_PLANE + 1}, options_float);
+  BoxesMetaKernel<<<blocks, threads, 0, stream>>>(
+      boxes.packed_accessor32<float, 3, at::RestrictPtrTraits>(),
+      boxes_parameters.packed_accessor32<float, 2, at::RestrictPtrTraits>()
+  );
 
   // 2. Initialize an all-zero vector that will hold the duplicate count for
   // each box (0 indicates a box not having better duplicate representations)
@@ -174,11 +160,9 @@ at::Tensor NMSCuda(const at::Tensor &labels, const at::Tensor &scores, const at:
   NMSDuplicateKernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
       labels.packed_accessor32<int, 1, at::RestrictPtrTraits>(),
       sorting_index.packed_accessor32<int, 1, at::RestrictPtrTraits>(),
-      boxes_center.packed_accessor32<float, 2, at::RestrictPtrTraits>(),
-      boxes_triangles.packed_accessor32<float, 4, at::RestrictPtrTraits>(),
-      boxes_planes.packed_accessor32<float, 4, at::RestrictPtrTraits>(),
-      boxes_volume.packed_accessor32<float, 1, at::RestrictPtrTraits>(), iou_threshold, distance_threshold,
-      is_duplicate.packed_accessor32<int, 2, at::RestrictPtrTraits>());
+      boxes_parameters.packed_accessor32<float, 2, at::RestrictPtrTraits>(), iou_threshold, distance_threshold,
+      is_duplicate.packed_accessor32<int, 2, at::RestrictPtrTraits>()
+  );
   AT_CUDA_CHECK(cudaGetLastError());
 
   // 3. Return count==0 boolean mask to indicate which boxes to keep
