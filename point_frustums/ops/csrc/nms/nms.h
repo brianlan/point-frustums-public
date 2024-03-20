@@ -3,7 +3,7 @@
 //
 
 #pragma once
-
+#include "utils/pytorch3d_cutils.h"
 #include <torch/extension.h>
 
 // CPU implementation
@@ -17,7 +17,6 @@ at::Tensor NMSCuda(const at::Tensor &labels, const at::Tensor &scores, const at:
 // Main Entrypoint
 inline at::Tensor NMS(const at::Tensor &labels, const at::Tensor &scores, const at::Tensor &boxes,
                       const double iou_threshold, const double distance_threshold) {
-
   if (labels.is_cuda() || scores.is_cuda() || boxes.is_cuda()) {
 #ifdef WITH_CUDA
     CHECK_CUDA(labels);

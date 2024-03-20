@@ -3,9 +3,10 @@
 //
 #include "iou_box3d/iou_utils.cuh"
 #include "utils/float_math.cuh"
+#include <math.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <thrust/tuple.h>
 
