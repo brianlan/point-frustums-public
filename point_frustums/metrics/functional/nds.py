@@ -215,7 +215,7 @@ def _nds_compute_calculate_ap(precision: torch.Tensor, min_recall: float, min_pr
     """
     min_recall_bin_index = round(min_recall * (n_bins - 1))
     normalization_factor = 1 - min_precision
-    return (precision[min_recall_bin_index + 1 :] - min_precision).clamp(min=0).mean() / normalization_factor
+    return (precision[min_recall_bin_index + 1 :] - min_precision).clamp(min=0).mean().item() / normalization_factor
 
 
 def _nds_compute_interpolate_tp_error(score, error, score_support):

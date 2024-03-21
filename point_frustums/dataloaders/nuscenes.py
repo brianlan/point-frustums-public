@@ -32,6 +32,15 @@ VISIBILITY_LEVELS = {
     "v60-80": 80,
     "v80-100": 100,
 }
+EMPTY_TARGET_TENSOR_OPTIONS: dict[str, dict] = {
+    "class": {"size": (0,), "dtype": torch.int64},
+    "label": {"size": (0,), "dtype": torch.int64},
+    "attribute": {"size": (0,), "dtype": torch.int64},
+    "center": {"size": (0, 3), "dtype": torch.float32},
+    "wlh": {"size": (0, 3), "dtype": torch.float32},
+    "orientation": {"size": (0, 4), "dtype": torch.float32},
+    "velocity": {"size": (0, 3), "dtype": torch.float32},
+}
 
 
 class Sample(NamedTuple):
@@ -251,7 +260,7 @@ class NuScenes(Dataset):
 
         for key, value in boxes_stacked.items():
             if len(value) == 0:
-                boxes_stacked[key] = None
+                boxes_stacked[key] = torch.zeros(**EMPTY_TARGET_TENSOR_OPTIONS[key])
             elif key in ("label", "attribute"):
                 boxes_stacked[key] = torch.tensor(value)
             else:
@@ -392,8 +401,8 @@ class NuScenes(Dataset):
                 # Load the inverse rotation between the calibrated sensor and the EGO vehicle as Quaternion
                 rotation = Quaternion(calibrated_sensor_data["rotation"]).inverse
                 # Transform to the COOS of the annotations
-                velocity = rotation.inverse.rotate(velocity).astype(np.float32)
-            meta["velocity"] = torch.from_numpy(velocity)
+                velocity = rotation.inverse.rotate(velocity)
+            meta["velocity"] = torch.from_numpy(velocity).float()
 
         return meta
 

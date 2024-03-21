@@ -11,7 +11,7 @@ init_args:
             init_args:
               channels_in: [x, y, z, intensity, timestamp, radial, polar, azimuthal]
               discretize:
-                n_splits_azi: 360
+                n_splits_azi: 384
                 n_splits_pol: 40
                 fov_azi_deg: [-180, 180]
                 fov_pol_deg: [60, 100]
@@ -63,7 +63,7 @@ init_args:
     alpha: 1.2
     beta: 1
     gamma: 1
-    max_iter: 25000
+    max_iter: 2500
   losses:
     label:
       weight: 2

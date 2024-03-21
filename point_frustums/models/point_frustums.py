@@ -425,7 +425,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         :param feat_corners:
         :return: An integer tensor where -1 represents background and all values >= 0 correspond to one of the targets.
         """
-        if target_labels is None:
+        if target_labels.numel() == 0:
             return torch.full((self.featuremap_parametrization.total_size,), -1, device=self.device)
 
         targets_spherical_projection = get_featuremap_projection_boundaries(
@@ -675,6 +675,14 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             foreground.append(fg)
             target_indices = index[fg]
             targets_indices.append(target_indices)
+
+            if target_labels.numel() == 0:
+                targets_label.append(target_labels.new_full(index.shape + (self.annotations.n_classes,), 0).float())
+                targets_attribute.append(
+                    targets[i].attribute.new_full(index.shape + (self.annotations.n_attributes,), 0).float()
+                )
+                targets_iou.append(target_labels.new_full(index.shape + (self.annotations.n_classes,), 0).float())
+                continue
 
             target_labels = target_labels[index, :]
             target_labels[~fg, :] = 0

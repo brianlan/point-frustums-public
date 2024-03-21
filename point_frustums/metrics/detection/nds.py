@@ -117,10 +117,14 @@ class NuScenesDetectionScore(Metric):
 
             # Iterate over the distance thresholds
             for i, threshold in enumerate(self.distance_thresholds):
-                # Assign each detection a target is possible, otherwise the returned distance is inf
-                match_distance, match_idx = _nds_update_assign_target(
-                    threshold, distance, class_match, score=detections["score"]
-                )
+                if targets["class"].numel() == 0:
+                    match_distance = torch.full(detections["class"].shape, torch.inf).to(detections["class"].device)
+                    match_idx = torch.full_like(detections["class"], 0)
+                else:
+                    # Assign each detection a target is possible, otherwise the returned distance is inf
+                    match_distance, match_idx = _nds_update_assign_target(
+                        threshold, distance, class_match, score=detections["score"]
+                    )
 
                 # Append the false positive state
                 mask_fp = torch.isinf(match_distance)

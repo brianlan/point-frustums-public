@@ -1,7 +1,7 @@
 class_path: point_frustums.dataloaders.NuScenesDataModule
 init_args:
-  batch_size: 8
-  num_workers: 4
+  batch_size: 16
+  num_workers: 8
   pin_memory: True
   persistent_workers: True
   augmentations:
