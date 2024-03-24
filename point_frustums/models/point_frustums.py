@@ -1,5 +1,6 @@
 import random
 from copy import deepcopy
+from functools import cached_property
 from math import prod, exp, isclose
 from typing import Literal, Optional, Any
 
@@ -287,6 +288,14 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         :return:
         """
         return self.get_buffer("feat_center_pol_azi")
+
+    @cached_property
+    def top_k(self):
+        return torch.tensor(self.predictions.top_k, device=self.device)
+
+    @cached_property
+    def n_detections(self):
+        return torch.tensor(self.predictions.n_detections, device=self.device)
 
     @staticmethod
     def _one_hot(label: torch.Tensor, num_classes: int, index: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -759,6 +768,13 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 loss.append(loss_config.weight * val)
         return torch.stack(loss, dim=0).sum(dim=0)
 
+    @staticmethod
+    def _subset_sample_mask(score: torch.Tensor, sample_mask: torch.Tensor, top_k: torch.Tensor) -> torch.Tensor:
+        score = score.clone()
+        score[~sample_mask] = 0
+        sample_mask[score.argsort(descending=True)[top_k:]] = False
+        return sample_mask
+
     def get_detections(
         self,
         output: dict[
@@ -788,7 +804,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         # Decode the box quantities
         attribute = output["attribute"]
-        center = self._decode_center(output["center"], idx_feat=indices[1])
+        center = sph_to_cart_torch(self._decode_center(output["center"], idx_feat=indices[1]))
         wlh = self._decode_wlh(output["wlh"])
         orientation = self._decode_orientation(output["orientation"], idx_feat=indices[1])
         # Broadcast the ego_velocities to match the subset of predictions
@@ -799,54 +815,40 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Subset and flatten the score, now corresponds to the columns of indices
         score = score[indices]
         batch_detections = []
-        for sample_idx in range(batch_size):
+        for sample_index in range(batch_size):
             sample_detections = {}
-            # Process samples separately, since they will contain a different number of valid detections
-            sample_mask = torch.eq(indices[0], sample_idx)
-            sample_indices = sample_mask.nonzero().squeeze(dim=1)
 
+            sample_mask = torch.eq(indices[0], sample_index)
             # Subset sample output to the configured number of top predictions that should be considered for NMS
-            k = min(sample_indices.numel(), self.predictions.top_k)
-            sample_top_scores, sample_top_indices = score[sample_indices].topk(k=k)
-            sample_top_indices = sample_indices[sample_top_indices]
+            sample_mask = self._subset_sample_mask(score, sample_mask, top_k=torch.min(sample_mask.sum(), self.top_k))
 
             # Subset the sample subset by performing NMS and then selecting only the top duplicate-free detections
-            # Get the class labels (equivalent to the second column index) of the subset
-            class_label = indices[2][sample_top_indices]
-            # Subset and convert centers (to avoid re-computation)
-            sample_top_centers_cartesian = sph_to_cart_torch(center[sample_top_indices, ...])
-
-            # Perform 3D NMS
             boxes = get_corners_3d(
-                centers=sample_top_centers_cartesian,
-                wlh=wlh[sample_top_indices, ...],
-                orientation=orientation[sample_top_indices, ...],
+                centers=center[sample_mask, ...],
+                wlh=wlh[sample_mask, ...],
+                orientation=orientation[sample_mask, ...],
             )
-            nms_keep_mask = nms_3d(
-                labels=class_label,
-                scores=sample_top_scores,
+            # Write NMS results directly to the sample mask
+            sample_mask[sample_mask.clone()] &= nms_3d(
+                labels=indices[2][sample_mask],
+                scores=score[sample_mask],
                 boxes=boxes,
                 iou_threshold=self.predictions.nms_threshold,
             )
-            nms_keep_indices = nms_keep_mask.nonzero().squeeze(dim=1)
-            # Subset the duplicate-free outputs to the configured number of detections
-            k = nms_keep_mask.count_nonzero().min(torch.tensor(self.predictions.n_detections))
-            detections_top_scores, detections_top_indices = sample_top_scores[nms_keep_mask].topk(k)
-            detections_top_indices = nms_keep_indices[detections_top_indices]
 
-            # Subset the sample top indices to the actual detection indices
-            sample_detections_indices = sample_top_indices[detections_top_indices]
+            # Subset the duplicate-free outputs to the configured number of detections
+            sample_mask = self._subset_sample_mask(score, sample_mask, torch.min(sample_mask.sum(), self.n_detections))
 
             # The score already corresponds to the detections subset
-            sample_detections["score"] = detections_top_scores
+            sample_detections["score"] = score[sample_mask]
             # The class and center are in the intermediate sample top subset format
-            sample_detections["class"] = class_label[detections_top_indices]
-            sample_detections["center"] = sample_top_centers_cartesian[detections_top_indices, ...]
+            sample_detections["class"] = indices[2][sample_mask]
+            sample_detections["center"] = center[sample_mask, ...]
             # The remaining quantities are the subset of the network output that surpasses the initial score threshold
-            sample_detections["attribute"] = attribute[sample_detections_indices, ...].max(dim=-1).indices
-            sample_detections["wlh"] = wlh[sample_detections_indices, ...]
-            sample_detections["orientation"] = orientation[sample_detections_indices, ...]
-            sample_detections["velocity"] = velocity[sample_detections_indices, ...]
+            sample_detections["attribute"] = attribute[sample_mask, ...].max(dim=-1).indices
+            sample_detections["wlh"] = wlh[sample_mask, ...]
+            sample_detections["orientation"] = orientation[sample_mask, ...]
+            sample_detections["velocity"] = velocity[sample_mask, ...]
 
             batch_detections.append(sample_detections)
 
