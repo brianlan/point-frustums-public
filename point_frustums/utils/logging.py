@@ -26,6 +26,11 @@ def log_pointcloud(
             data = data.clone()
             data = de_normalize(data=data, **pc_normalization)
 
+    #  Transfer everything to the CPU
+    data = data.cpu()
+    detections = {k: v.cpu() for k, v in detections.items()}
+    targets = {k: v.cpu() for k, v in targets.items()}
+
     if isinstance(logger, TensorBoardLogger):
         fig = plot_pointcloud_bev(points=data, targets=targets, detections=detections)
         logger.experiment.add_figure(tag, fig, step)
