@@ -29,6 +29,7 @@ from point_frustums.geometry.utils import get_corners_3d, get_featuremap_project
 from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.logging import log_pointcloud
+from point_frustums.utils.plotting import render_target_assignment
 from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
 from .base_models import Detection3DModel
@@ -534,6 +535,14 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Assign entries that matched the last/background row to the background i.e. -1
         foreground_index = match_index != binary_pre_mapping.shape[1]
         match_index[~foreground_index] = -1
+
+        if self.logging.render_target_assignment:
+            render_target_assignment(
+                target_corners=target_corners,
+                assigned_corners=feat_corners[foreground_index, ...],
+                target_index=match_index[foreground_index],
+                wandb_logger=[l for l in self.loggers if isinstance(l, pytorch_lightning.loggers.WandbLogger)][0],
+            )
 
         return match_index
 

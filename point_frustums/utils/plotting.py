@@ -185,3 +185,20 @@ def plot_pointcloud_wandb(
 
     pointcloud = wandb.Object3D({"type": "lidar/beta", "points": points, "boxes": boxes, "vectors": velocities})
     wandb_logger.experiment.log({tag: pointcloud, "trainer/global_step": step}, commit=False)
+
+
+def render_target_assignment(
+    target_corners: torch.Tensor, assigned_corners: torch.Tensor, target_index: torch.Tensor, wandb_logger
+):
+    targets_list = []
+    for i, target in enumerate(target_corners.cpu().tolist()):
+        targets_list.append({"corners": target, "label": i, "color": COLORS["MintGreen"].tolist()})
+
+    assignment_list = []
+    target_index = target_index.cpu().tolist()
+    for i, assignment in enumerate(assigned_corners.cpu().tolist()):
+        assignment_list.append({"corners": assignment, "label": str(target_index[i]), "color": COLORS["Red"].tolist()})
+    pointcloud = wandb.Object3D(
+        {"type": "lidar/beta", "points": np.array([[0.0, 0.0, 0.0]]), "boxes": np.array(targets_list + assignment_list)}
+    )
+    wandb_logger.experiment.log({"Pointcloud": pointcloud}, commit=False)

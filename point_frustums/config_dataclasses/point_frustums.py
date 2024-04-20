@@ -26,6 +26,7 @@ class Predictions:
 class Logging:
     frequency_log_train_sample: Optional[int] = None
     frequency_log_val_sample: Optional[int] = None
+    render_target_assignment: bool = False
 
 
 @dataclass(frozen=True, slots=True)
