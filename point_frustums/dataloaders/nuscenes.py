@@ -487,9 +487,22 @@ class NuScenes(Dataset):
 
         # Initialize the sample_data_token to the reference token which is loaded first
         sample_data_token = ref_sample_data_token
+
+        pc_files = []
         for _ in range(self.dataset.sensors[sensor_id].sweeps):
-            data_path = self.db.get_sample_data_path(sample_data_token)
-            pc = LidarPointCloud.from_file(data_path)
+            pc_files.append(self.db.get_sample_data_path(sample_data_token))
+            # Evaluate whether a previous sweep in the current scene exists
+            if sample_data["prev"] == "":
+                break
+            # Overwrite the sample_data(_token) with the one from the previous sweep (that shall be loaded next)
+            sample_data_token = sample_data["prev"]
+            sample_data = self.db.get("sample_data", sample_data_token)
+
+        for file in pc_files:
+            try:
+                pc = LidarPointCloud.from_file(file)
+            except ValueError as err:
+                logger.warning(f"The pointcloud in {file} could not be loaded due to a corrupted shape.")
 
             # Keep only points that are at least min_distance away (others are most likely artefacts)
             pc.points = pc.points[:, np.linalg.norm(pc.points[0:2, :], axis=0) >= min_distance]
@@ -508,14 +521,6 @@ class NuScenes(Dataset):
             pc = self.add_timestamps(pc, timestamp_reference, timestamp_sample)
 
             sweeps.append(pc.astype(np.float32))
-
-            # Evaluate whether a previous sweep in the current scene exists
-            if sample_data["prev"] == "":
-                break
-
-            # Overwrite the sample_data(_token) with the one from the previous sweep (that shall be loaded next)
-            sample_data_token = sample_data["prev"]
-            sample_data = self.db.get("sample_data", sample_data_token)
 
         sweeps = np.concatenate(sweeps, axis=1).T
 
