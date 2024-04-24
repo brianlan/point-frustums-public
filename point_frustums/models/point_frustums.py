@@ -838,7 +838,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 orientation=orientation[sample_mask, ...],
             )
             # Write NMS results directly to the sample mask
-            sample_mask[sample_mask.clone()] &= nms_3d(
+            sample_mask[sample_mask.clone()] = nms_3d(
                 labels=indices[2][sample_mask],
                 scores=score[sample_mask],
                 boxes=boxes,
