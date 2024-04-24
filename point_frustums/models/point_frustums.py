@@ -949,6 +949,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     def on_validation_epoch_end(self) -> None:
         nds = self.nds_val.compute()
         self.log_dict(self.nds_val.log_dict(nds, mode="val"), on_epoch=True)
+        self.nds_val.reset()
 
     def test_step(self, batch, batch_idx):
         pass
