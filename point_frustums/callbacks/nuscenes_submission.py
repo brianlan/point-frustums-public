@@ -19,7 +19,7 @@ from point_frustums.geometry.quaternion import quaternion_from_rotation_matrix
 
 
 async def retrieve_boxes(
-    store: dist.Store, keys: list[str], timeout: timedelta = timedelta(seconds=5)
+    store: dist.Store, keys: list[str], timeout: timedelta = timedelta(seconds=1)
 ) -> dict[str, list[dict]]:
     """
     Asynchronously retrieve all specified keys from the store.
@@ -144,7 +144,7 @@ class CreateNuScenesSubmission(Callback):
     def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         self.on_epoch_start()
 
-    def on_batch_end(self, detections, metadata, annotations: Annotations):
+    def on_batch_end(self, detections: list[dict[str, torch.Tensor]], metadata: list[dict], annotations: Annotations):
         for sample_detections, sample_metadata in zip(detections, metadata):
             sample_token, sample_detections = parse_sample_detections(
                 sample_detections, sample_metadata, annotations=annotations
@@ -175,8 +175,8 @@ class CreateNuScenesSubmission(Callback):
     ) -> None:
         self.on_batch_end(outputs["detections"], metadata=batch["metadata"], annotations=pl_module.annotations)
 
-    def on_epoch_end(self, trainer, dataset: NuScenes):
-        if trainer.sanity_checking or bool(trainer.fast_dev_run):
+    def on_epoch_end(self, trainer: Trainer, dataset: NuScenes):
+        if trainer.sanity_checking or bool(trainer.fast_dev_run):  # NOQA
             self.store = None
             return
 
@@ -184,6 +184,7 @@ class CreateNuScenesSubmission(Callback):
             sample_tokens = dataset.sample_tokens
         except AttributeError as err:
             raise AttributeError("Cannot create a NuScenes submission.") from err
+        # TODO: This seems to be very slow for a larger number of keys
         all_detections = asyncio.run(retrieve_boxes(store=self.store, keys=sample_tokens))
         modalities = {s.modality for s in dataset.dataset.sensors.values()}
         submission_metadata = {

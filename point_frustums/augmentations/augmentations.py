@@ -37,6 +37,7 @@ class Augmentation(nn.Module, ABC):
     def metadata(self, metadata: MutableMapping):
         pass
 
+    @torch.no_grad()
     def forward(  # pylint: disable=too-many-arguments
         self,
         lidar: Optional[MutableMapping[str, torch.Tensor]],

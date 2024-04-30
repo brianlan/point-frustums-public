@@ -1,7 +1,7 @@
 class_path: point_frustums.dataloaders.NuScenesDataModule
 init_args:
-  batch_size: 16
-  num_workers: 8
+  batch_size: 8
+  num_workers: 3
   pin_memory: True
   persistent_workers: True
   augmentations:
@@ -11,8 +11,8 @@ init_args:
           apply_to: [lidar]
           lidar:
             channels: [2, 3, 4, 5]  # [z, intensity, timestamp, radial]
-            mean: [-0.776, 18.421, 0.098, 12.978]
-            std: [1.869, 19.603, 0.057, 12.559]
+            mean: [ -0.729, 18.395, 0.243, 13.540 ]
+            std: [ 1.916, 19.789, 0.141, 12.564 ]
           camera:
             channels: [ 0, 1, 2 ]
             mean: [ 123.675, 116.28, 103.53 ]
@@ -37,8 +37,8 @@ init_args:
           apply_to: [ lidar ]
           lidar:
             channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
-            mean: [ -0.776, 18.421, 0.098, 12.978 ]
-            std: [ 1.869, 19.603, 0.057, 12.559 ]
+            mean: [ -0.729, 18.395, 0.243, 13.540 ]
+            std: [ 1.916, 19.789, 0.141, 12.564 ]
           camera:
             channels: [ 0, 1, 2 ]
             mean: [ 123.675, 116.28, 103.53 ]
@@ -49,8 +49,8 @@ init_args:
           apply_to: [ lidar ]
           lidar:
             channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
-            mean: [ -0.776, 18.421, 0.098, 12.978 ]
-            std: [ 1.869, 19.603, 0.057, 12.559 ]
+            mean: [ -0.729, 18.395, 0.243, 13.540 ]
+            std: [ 1.916, 19.789, 0.141, 12.564 ]
           camera:
             channels: [ 0, 1, 2 ]
             mean: [ 123.675, 116.28, 103.53 ]
@@ -61,8 +61,8 @@ init_args:
           apply_to: [ lidar ]
           lidar:
             channels: [ 2, 3, 4, 5 ]  # [z, intensity, timestamp, radial]
-            mean: [ -0.776, 18.421, 0.098, 12.978 ]
-            std: [ 1.869, 19.603, 0.057, 12.559 ]
+            mean: [ -0.729, 18.395, 0.243, 13.540 ]
+            std: [ 1.916, 19.789, 0.141, 12.564 ]
           camera:
             channels: [ 0, 1, 2 ]
             mean: [ 123.675, 116.28, 103.53 ]
@@ -81,7 +81,7 @@ init_args:
         orientation_degrees:
           polar: 0
           azimuthal: -90
-        sweeps: 4
+        sweeps: 7
       CAM_FRONT:
         active: False
         modality: camera
@@ -97,7 +97,7 @@ init_args:
           azimuthal: 1600
     annotations:
       coos: EGO
-      visibility: 45
+      visibility: 0
       class_aliases: [ pedestrian, car, bus, bicycle, truck, trailer, construction_vehicle, traffic_cone, barrier, motorcycle ]
       alias_to_class:
         pedestrian: human.pedestrian

@@ -139,7 +139,8 @@ class NuScenes(Dataset):
 
         # Apply augmentation to data and targets
         if self.augmentations is not None:
-            data = self.apply_augmentations(Sample(**data)).as_dict()
+            with torch.inference_mode():
+                data = self.apply_augmentations(Sample(**data)).as_dict()
         return data
 
     def apply_augmentations(self, sample: Sample) -> Sample:

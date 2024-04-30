@@ -3,15 +3,15 @@ model: ./models/point_frustums.yaml
 
 trainer:
   default_root_dir: training
-  max_epochs: 24
-  log_every_n_steps: 10
-  accumulate_grad_batches: 5
+  max_epochs: 1000
+  log_every_n_steps: 5
+  accumulate_grad_batches: 4
   gradient_clip_val: 50
   gradient_clip_algorithm: norm
   callbacks:
     - LearningRateMonitor
     - RichProgressBar
-    - point_frustums.callbacks.CreateNuScenesSubmission
+    #- point_frustums.callbacks.CreateNuScenesSubmission
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
