@@ -7,7 +7,7 @@ from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
 
 from point_frustums.config_dataclasses.dataset import Annotations
-from point_frustums.utils.targets import Boxes, Targets
+from point_frustums.utils.custom_types import Boxes, Targets
 from ..functional.nds import (
     _nds_update_distance_function,
     _nds_update_class_match_function,

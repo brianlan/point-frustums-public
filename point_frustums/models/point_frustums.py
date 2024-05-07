@@ -28,9 +28,9 @@ from point_frustums.geometry.rotation_matrix import (
 from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
 from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
+from point_frustums.utils.custom_types import Targets
 from point_frustums.utils.logging import log_pointcloud
 from point_frustums.utils.plotting import render_target_assignment
-from point_frustums.utils.targets import Targets
 from .backbones import PointFrustumsBackbone
 from .base_models import Detection3DModel
 from .base_runtime import Detection3DRuntime

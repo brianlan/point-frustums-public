@@ -15,7 +15,7 @@ from point_frustums.config_dataclasses.dataset import Annotations
 from point_frustums.dataloaders.nuscenes import NuScenes
 from point_frustums.geometry.boxes import transform_boxes
 from point_frustums.geometry.quaternion import quaternion_from_rotation_matrix
-from point_frustums.utils.targets import Boxes
+from point_frustums.utils.custom_types import Boxes
 
 
 async def retrieve_boxes(

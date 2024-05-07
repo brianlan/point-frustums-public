@@ -10,7 +10,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 
 from point_frustums.config_dataclasses.dataset import Labels
 from point_frustums.geometry.utils import get_corners_3d
-from point_frustums.utils.targets import Boxes, Targets
+from point_frustums.utils.custom_types import Boxes, Targets
 
 COLORS = {
     "Blue": np.array([65, 47, 215]) / 255,

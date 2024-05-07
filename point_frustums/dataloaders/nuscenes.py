@@ -24,7 +24,7 @@ from point_frustums.geometry.boxes import transform_boxes
 from point_frustums.geometry.quaternion import quaternion_to_rotation_matrix
 from point_frustums.geometry.utils import cart_to_sph_numpy
 from point_frustums.utils.environment_helpers import data_root_getter
-from point_frustums.utils.targets import Targets
+from point_frustums.utils.custom_types import Targets
 
 VISIBILITY_LEVELS = {
     "v0-40": 40,

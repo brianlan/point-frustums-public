@@ -6,7 +6,7 @@ from typing import Optional
 
 import torch
 
-from point_frustums.utils.targets import Targets
+from point_frustums.utils.custom_types import Targets
 from .augmentations import Augmentation
 
 

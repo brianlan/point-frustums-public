@@ -6,7 +6,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from point_frustums.utils.targets import Targets
+from point_frustums.utils.custom_types import Targets
 
 
 class Augmentation(nn.Module, ABC):
