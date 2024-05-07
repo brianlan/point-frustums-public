@@ -6,7 +6,6 @@ from copy import deepcopy
 from datetime import timedelta
 from typing import Any
 
-import torch
 import torch.distributed as dist
 from pytorch_lightning import Callback, Trainer, LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
@@ -16,6 +15,7 @@ from point_frustums.config_dataclasses.dataset import Annotations
 from point_frustums.dataloaders.nuscenes import NuScenes
 from point_frustums.geometry.boxes import transform_boxes
 from point_frustums.geometry.quaternion import quaternion_from_rotation_matrix
+from point_frustums.utils.targets import Boxes
 
 
 async def retrieve_boxes(
@@ -46,7 +46,7 @@ async def retrieve_boxes(
     return dict(ChainMap(*results))
 
 
-def preprocess_boxes(boxes: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+def preprocess_boxes(boxes: Boxes) -> Boxes:
     """
     Clamp the WLH box sizes to be greater zero and convert orientation to quaternion.
     :param boxes:
@@ -57,7 +57,7 @@ def preprocess_boxes(boxes: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     return boxes
 
 
-def postprocess_boxes(boxes: dict[str, torch.Tensor], sample_token: str, annotations: Annotations) -> list[dict]:
+def postprocess_boxes(boxes: Boxes, sample_token: str, annotations: Annotations) -> list[dict]:
     """
     Convert the integer {class, attribute} labels to the string representation and re-packs the tensor format into a
     list of boxes.
@@ -97,7 +97,7 @@ def postprocess_boxes(boxes: dict[str, torch.Tensor], sample_token: str, annotat
 
 
 def parse_sample_detections(
-    sample_detections: dict[str, torch.Tensor],
+    sample_detections: Boxes,
     sample_metadata: dict,
     annotations: Annotations,
 ) -> tuple[str, list[dict]]:
@@ -144,7 +144,7 @@ class CreateNuScenesSubmission(Callback):
     def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         self.on_epoch_start()
 
-    def on_batch_end(self, detections: list[dict[str, torch.Tensor]], metadata: list[dict], annotations: Annotations):
+    def on_batch_end(self, detections: list[Boxes], metadata: list[dict], annotations: Annotations):
         for sample_detections, sample_metadata in zip(detections, metadata):
             sample_token, sample_detections = parse_sample_detections(
                 sample_detections, sample_metadata, annotations=annotations

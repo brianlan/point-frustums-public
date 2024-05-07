@@ -47,16 +47,16 @@ class RandomFlipHorizontal(RandomAugmentation):
 
     def targets(self, targets: Targets):
         # Flip the center along the specified axis
-        targets.center[:, self._dims.index(self.flip_along_cart)] *= -1
+        targets["center"][:, self._dims.index(self.flip_along_cart)] *= -1
 
         # Mirroring of the orientation along one axis is achieved by flipping the components of the other two axis.
-        targets_quaternion = quaternion_from_rotation_matrix(targets.orientation)
+        targets_quaternion = quaternion_from_rotation_matrix(targets["orientation"])
         targets_quaternion[..., self.quaternion_flip_indices] *= -1
-        targets.orientation[...] = quaternion_to_rotation_matrix(targets_quaternion)
+        targets["orientation"][...] = quaternion_to_rotation_matrix(targets_quaternion)
 
         # Flip the velocity similarly
-        if targets.velocity is not None:
-            targets.velocity[:, self._dims.index(self.flip_along_cart)] *= -1
+        if targets["velocity"] is not None:
+            targets["velocity"][:, self._dims.index(self.flip_along_cart)] *= -1
 
         return targets
 
@@ -105,12 +105,12 @@ class RandomRotate(RandomAugmentation):
 
     def targets(self, targets: Targets):
         # Rotate the center vector
-        targets.center[...] = torch.einsum("ij,...j->...i", self._matrix, targets.center)
+        targets["center"][...] = torch.einsum("ij,...j->...i", self._matrix, targets["center"])
         # Apply the rotation to the orientation matrix
-        targets.orientation[...] = torch.einsum("ij,...jk->...ik", self._matrix, targets.orientation)
+        targets["orientation"][...] = torch.einsum("ij,...jk->...ik", self._matrix, targets["orientation"])
         # Flip the velocity similarly
-        if targets.velocity is not None:
-            targets.velocity[...] = torch.einsum("ij,...j->...i", self._matrix, targets.velocity)
+        if targets["velocity"] is not None:
+            targets["velocity"][...] = torch.einsum("ij,...j->...i", self._matrix, targets["velocity"])
 
         return targets
 

@@ -10,6 +10,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 
 from point_frustums.config_dataclasses.dataset import Labels
 from point_frustums.geometry.utils import get_corners_3d
+from point_frustums.utils.targets import Boxes, Targets
 
 COLORS = {
     "Blue": np.array([65, 47, 215]) / 255,
@@ -76,7 +77,7 @@ def _white_grid(ax, x_label, y_label):
 
 def plot_pointcloud_bev(
     points: torch.Tensor,
-    targets: dict[str, torch.Tensor],
+    targets: Targets,
     ego_velocity: Optional[torch.Tensor] = None,
     detections: Optional[dict[str, torch.Tensor]] = None,
     figure_size: tuple[float, float] = (5.0, 5.0),
@@ -121,7 +122,7 @@ def plot_pointcloud_bev(
     return fig
 
 
-def create_boxes_log(boxes: dict[str, torch.Tensor], color: tuple[int, int, int]) -> tuple[list[dict], list[dict]]:
+def create_boxes_log(boxes: Boxes, color: tuple[int, int, int]) -> tuple[list[dict], list[dict]]:
     n_boxes = boxes["class"].numel()
     if n_boxes == 0:
         return [], []
@@ -138,7 +139,7 @@ def create_boxes_log(boxes: dict[str, torch.Tensor], color: tuple[int, int, int]
     velocity_list = []
 
     for i in range(n_boxes):
-        box_list.append({"corners": corners[i], "label": labels[i], "color": color})
+        box_list.append({"corners": corners[i], "class": labels[i], "color": color})
         velocity_list.append({"start": centers[i], "end": vel_end[i]})
     return box_list, velocity_list
 
@@ -146,7 +147,7 @@ def create_boxes_log(boxes: dict[str, torch.Tensor], color: tuple[int, int, int]
 def plot_pointcloud_wandb(
     wandb_logger: WandbLogger,
     points: torch.Tensor,
-    targets: dict[str, torch.Tensor],
+    targets: Targets,
     tag: str = "Pointcloud",
     step: Optional[int] = None,
     ego_velocity: Optional[torch.Tensor] = None,
@@ -168,10 +169,10 @@ def plot_pointcloud_wandb(
 
     if label_enum is not None:
         for box in boxes:
-            box["label"] = label_enum.from_index(box["label"]).name
+            box["class"] = label_enum.from_index(box["class"]).name
     else:
         for box in boxes:
-            box["label"] = str(box["label"])
+            box["class"] = str(box["class"])
 
     if ego_velocity is not None:
         velocities.append({"start": [0, 0, 0], "end": ego_velocity.tolist()})

@@ -34,7 +34,6 @@ VISIBILITY_LEVELS = {
 }
 EMPTY_TARGET_TENSOR_OPTIONS: dict[str, dict] = {
     "class": {"size": (0,), "dtype": torch.int64},
-    "label": {"size": (0,), "dtype": torch.int64},
     "attribute": {"size": (0,), "dtype": torch.int64},
     "center": {"size": (0, 3), "dtype": torch.float32},
     "wlh": {"size": (0, 3), "dtype": torch.float32},
@@ -200,7 +199,7 @@ class NuScenes(Dataset):
         self,
         sample: Mapping,
         sensor: str,
-    ) -> Sequence[Targets, Mapping]:
+    ) -> tuple[Targets, dict[str, list]]:
         """
         Load the targets in the COOS specified for the annotations and return them together with the transformations
         stored in the metadata.
@@ -221,7 +220,7 @@ class NuScenes(Dataset):
         metadata = {"translation": ego["translation"], "rotation": ego["rotation"]}
 
         # Make list of Box objects including coord system transforms.
-        boxes_stacked = {"wlh": [], "center": [], "orientation": [], "velocity": [], "label": [], "attribute": []}
+        boxes_stacked = {"wlh": [], "center": [], "orientation": [], "velocity": [], "class": [], "attribute": []}
 
         for box in self.db.get_boxes(data_token):
             # sample["anns"] contains the same box.tokens as returned by get_boxes but the latter also interpolates
@@ -252,7 +251,7 @@ class NuScenes(Dataset):
             # Retrieve the relevant row from the attributes table to access the integer label
             attribute = self.dataset.annotations.attributes.from_name(attribute)
 
-            boxes_stacked["label"].append(label.value)
+            boxes_stacked["class"].append(label.value)
             boxes_stacked["wlh"].append(box.wlh)
             boxes_stacked["center"].append(box.center)
             boxes_stacked["orientation"].append(box.orientation.q)
@@ -262,7 +261,7 @@ class NuScenes(Dataset):
         for key, value in boxes_stacked.items():
             if len(value) == 0:
                 boxes_stacked[key] = torch.zeros(**EMPTY_TARGET_TENSOR_OPTIONS[key])
-            elif key in ("label", "attribute"):
+            elif key in ("class", "attribute"):
                 boxes_stacked[key] = torch.tensor(value)
             else:
                 # Convert float64 to float32
@@ -284,7 +283,7 @@ class NuScenes(Dataset):
         # Convert orientation to matrix representation
         boxes_stacked["orientation"] = quaternion_to_rotation_matrix(boxes_stacked["orientation"])
 
-        return Targets(**boxes_stacked), metadata
+        return boxes_stacked, metadata
 
     @lru_cache(maxsize=128)
     def load_pose_from_can(self, scene_name: str, message: str = "pose") -> Sequence[pd.DataFrame, pd.DatetimeIndex]:

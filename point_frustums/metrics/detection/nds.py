@@ -7,6 +7,7 @@ from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
 
 from point_frustums.config_dataclasses.dataset import Annotations
+from point_frustums.utils.targets import Boxes, Targets
 from ..functional.nds import (
     _nds_update_distance_function,
     _nds_update_class_match_function,
@@ -96,8 +97,8 @@ class NuScenesDetectionScore(Metric):
 
     def update(  # pylint: disable=arguments-differ
         self,
-        batch_detections: list[dict[str, torch.Tensor]],
-        batch_targets: list[dict[str, torch.Tensor]],
+        batch_detections: list[Boxes],
+        batch_targets: list[Targets],
     ):
         """
         Evaluate TP and FP detections for each distance threshold and append to the respective state. Increment the

@@ -439,9 +439,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             return torch.full((self.featuremap_parametrization.total_size,), -1, device=self.device)
 
         targets_spherical_projection = get_featuremap_projection_boundaries(
-            centers=targets.center,
-            wlh=targets.wlh,
-            orientation=targets.orientation,
+            centers=targets["center"],
+            wlh=targets["wlh"],
+            orientation=targets["orientation"],
             fov_pol=self.discretization.fov_pol,
             fov_azi=self.discretization.fov_azi,
             delta_pol=self.discretization.delta_pol,
@@ -466,9 +466,11 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Initialize the center distance to all zeros
         center_distance = torch.zeros_like(binary_pre_mapping, dtype=torch.float)
         # Calculate the cartesian distances between predictions and mapped targets (prev.: the distance of radius)
-        center_distance[idx] = torch.abs(feat_centers[idx[0], :].norm(dim=-1) - targets.center[idx[1], :].norm(dim=-1))
+        center_distance[idx] = torch.abs(
+            feat_centers[idx[0], :].norm(dim=-1) - targets["center"][idx[1], :].norm(dim=-1)
+        )
         # Normalize the distance by a factor based on the target box size
-        center_distance[idx] = center_distance[idx].div(targets.wlh[idx[1], :].norm(dim=-1))
+        center_distance[idx] = center_distance[idx].div(targets["wlh"][idx[1], :].norm(dim=-1))
         # Squash the relative distance to the range [0, 1) by application of tanh
         #   The division by the empirical factor kappa shifts the relevant range into dynamic range of tanh
         center_distance[idx] = center_distance[idx].div(self.target_assignment.kappa).tanh()
@@ -678,8 +680,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         for i in range(output["class"].shape[0]):
             # Assign the index of a target/the background to each prediction
             with torch.no_grad():
-                target_labels = self._one_hot(targets[i].label, self.annotations.n_classes)
-                target_corners = get_corners_3d(targets[i].center, targets[i].wlh, targets[i].orientation)
+                target_labels = self._one_hot(targets[i]["class"], self.annotations.n_classes)
+                target_corners = get_corners_3d(targets[i]["center"], targets[i]["wlh"], targets[i]["orientation"])
                 index = self._assign_target_index_to_features(
                     targets=targets[i],
                     target_labels=target_labels,
@@ -697,7 +699,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             if target_labels.numel() == 0:
                 targets_label.append(target_labels.new_full(index.shape + (self.annotations.n_classes,), 0).float())
                 targets_attribute.append(
-                    targets[i].attribute.new_full(index.shape + (self.annotations.n_attributes,), 0).float()
+                    targets[i]["attribute"].new_full(index.shape + (self.annotations.n_attributes,), 0).float()
                 )
                 targets_iou.append(target_labels.new_full(index.shape + (self.annotations.n_classes,), 0).float())
                 continue
@@ -705,7 +707,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             target_labels = target_labels[index, :]
             target_labels[~fg, :] = 0
             targets_label.append(target_labels)
-            targets_attribute.append(self._one_hot(targets[i].attribute, self.annotations.n_attributes, index))
+            targets_attribute.append(self._one_hot(targets[i]["attribute"], self.annotations.n_attributes, index))
             iou = torch.zeros_like(index, dtype=torch.float)
             iou[fg] = iou_vol_3d(feat_corners[i, fg, ...], target_corners[target_indices, ...])[0]
             # Take the one-hot encoded and broadcasted target labels from this sample and scale with the IoU
@@ -731,7 +733,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 self._loss_center(
                     predictions_center_fg=output["center"][foreground, ...],
                     foreground_idx=foreground_idx,
-                    targets_center=[t.center for t in targets],
+                    targets_center=[t["center"] for t in targets],
                     targets_indices_fg=targets_indices,
                 )
             )
@@ -739,7 +741,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             losses.update(
                 self._loss_wlh(
                     predictions_wlh_fg=output["wlh"][foreground, ...],
-                    targets_wlh=[t.wlh for t in targets],
+                    targets_wlh=[t["wlh"] for t in targets],
                     targets_indices_fg=targets_indices,
                 )
             )
@@ -748,7 +750,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 self._loss_orientation(
                     predictions_orientation_fg=output["orientation"][foreground, ...],
                     foreground_idx=foreground_idx,
-                    targets_orientation=[t.orientation for t in targets],
+                    targets_orientation=[t["orientation"] for t in targets],
                     targets_indices_fg=targets_indices,
                 )
             )
@@ -758,7 +760,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                     predictions_velocity_fg=output["velocity"][foreground, ...],
                     ego_velocities=ego_velocities,
                     foreground_idx=foreground_idx,
-                    targets_velocity=[t.velocity for t in targets],
+                    targets_velocity=[t["velocity"] for t in targets],
                     targets_indices_fg=targets_indices,
                 )
             )
@@ -894,7 +896,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                     logger,
                     data=batch.get("lidar")["LIDAR_TOP"][i],
                     augmentations_log=batch["metadata"][i].get("augmentations", {}),
-                    targets=batch.get("targets")[i].dict(),
+                    targets=batch.get("targets")[i],
                     detections=detections[i],
                     label_enum=self.annotations.classes,
                     tag=tag,
@@ -919,7 +921,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             ego_velocities = [sample["velocity"] for sample in batch["metadata"]]
             # Extract the detections from the network output and decode
             detections = self.get_detections(output=outputs["network_output"], ego_velocities=ego_velocities)
-            nds = self.nds_train(detections, [t.dict() for t in batch["targets"]])
+            nds = self.nds_train(detections, batch["targets"])
             self.log_dict(self.nds_train.log_dict(nds, mode="train"))
             modified_frequency = self.logging.frequency_log_train_sample / self.trainer.log_every_n_steps  # NOQA
             self._post_pointcloud(batch, detections, logging_frequency=modified_frequency, prefix="Train")
@@ -934,7 +936,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         losses = self.get_losses(output=network_output, targets=batch.get("targets"), ego_velocities=ego_velocities)
         losses["sum"] = self.sum_losses(losses)
         detections = self.get_detections(output=network_output, ego_velocities=ego_velocities)
-        self.nds_val.update(batch_detections=detections, batch_targets=[t.dict() for t in batch["targets"]])
+        self.nds_val.update(batch_detections=detections, batch_targets=batch["targets"])
         return {"losses": losses, "detections": detections}
 
     def on_validation_batch_end(self, outputs: VAL_STEP_OUTPUT, batch: Any, batch_idx: int, dataloader_idx: int = 0):
