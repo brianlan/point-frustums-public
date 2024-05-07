@@ -85,6 +85,7 @@ setup(
     install_requires=[
         "pytorch-lightning[extra]",
         "torchmetrics",
+        "litdata",
         "nuscenes-devkit>=1.1.10",
         "numpy>=1.24.2",
         "torch==2.2.1",

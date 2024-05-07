@@ -1,3 +1,4 @@
+import os
 from collections.abc import Mapping, MutableMapping, Sequence
 from functools import lru_cache, cached_property
 from functools import partial
@@ -17,14 +18,16 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset, default_collate
 from torchvision.io import read_image
 
+from litdata import StreamingDataset, StreamingDataLoader, optimize
+
 from point_frustums import ROOT_DIR
 from point_frustums.augmentations import Augmentation, RandomAugmentation
 from point_frustums.config_dataclasses.dataset import DatasetConfig, Sensor
 from point_frustums.geometry.boxes import transform_boxes
 from point_frustums.geometry.quaternion import quaternion_to_rotation_matrix
 from point_frustums.geometry.utils import cart_to_sph_numpy
-from point_frustums.utils.environment_helpers import data_root_getter
 from point_frustums.utils.custom_types import Targets
+from point_frustums.utils.environment_helpers import data_root_getter
 
 VISIBILITY_LEVELS = {
     "v0-40": 40,
@@ -501,8 +504,9 @@ class NuScenes(Dataset):
         for file in pc_files:
             try:
                 pc = LidarPointCloud.from_file(file)
-            except ValueError as err:
+            except ValueError:
                 logger.warning(f"The pointcloud in {file} could not be loaded due to a corrupted shape.")
+                continue
 
             # Keep only points that are at least min_distance away (others are most likely artefacts)
             pc.points = pc.points[:, np.linalg.norm(pc.points[0:2, :], axis=0) >= min_distance]
@@ -581,6 +585,32 @@ class NuScenes(Dataset):
         return train_scenes, val_scenes, test_scenes
 
 
+class NuScenesStreamingDataset(StreamingDataset):
+    def __init__(
+        self,
+        *args,
+        augmentations: Optional[list[Augmentation]] = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.augmentations = augmentations
+
+    def __getitem__(self, index):
+        data = super().__getitem__(index)
+        # Apply augmentation to data and targets
+        if self.augmentations is not None:
+            with torch.inference_mode():
+                data = self.apply_augmentations(Sample(**data)).as_dict()
+        return data
+
+    def apply_augmentations(self, sample: Sample) -> Sample:
+        for augmentation in self.augmentations:
+            if isinstance(augmentation, RandomAugmentation):
+                augmentation.refresh()
+            sample = augmentation(*sample)
+        return Sample(*sample)
+
+
 def partial_collate_fn(batch, sensors: dict[str, Sensor], load_annotations: bool) -> dict:
     """
     Custom collate function that handles the variable-sized point clouds and targets properly.
@@ -641,6 +671,7 @@ class NuScenesDataModule(LightningDataModule):
         augmentations: Optional[dict[Literal["train", "val", "test", "predict"], list[Augmentation]]] = None,
         predict_split: Literal["train", "val"] = "val",
         data_root: Optional[str] = None,
+        streaming_data_root: Optional[str] = None,
         batch_size: int = 1,
         num_workers: int = 0,
         pin_memory: bool = False,
@@ -651,6 +682,7 @@ class NuScenesDataModule(LightningDataModule):
         self.dataset = dataset
         self.augmentations = augmentations
         self.predict_split = predict_split
+        self.streaming_data_root = os.path.abspath(streaming_data_root) if streaming_data_root is not None else None
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -660,12 +692,56 @@ class NuScenesDataModule(LightningDataModule):
         self.data_root = data_root_getter(
             self.dataset.name, self.dataset.version, root_dir=ROOT_DIR, data_root=data_root
         )
-        self.db = NuScDB(version=self.dataset.version, dataroot=self.data_root, verbose=False)
         self.active_modalities = set(sensor.modality for sensor in self.dataset.sensors.values() if sensor.active)
 
-    def train_dataloader(self):
+    @cached_property
+    def nuscenes_database(self):
+        return NuScDB(version=self.dataset.version, dataroot=self.data_root, verbose=False)
+
+    def _optimize_split(self, output_dir, split: Literal["train", "val", "test"]):
+        os.makedirs(output_dir)
+        logger.info(f"Optimizing the {split} split of the NuScenes dataset into the directory {output_dir}")
+        load_annotations = split in ("train", "val")
         dataset = NuScenes(
-            db=self.db,
+            db=self.nuscenes_database,
+            dataset=self.dataset,
+            load_annotations=load_annotations,
+            augmentations=None,
+            split=split,
+        )
+
+        optimize(
+            fn=dataset.__getitem__,
+            inputs=list(range(len(dataset))),
+            output_dir=output_dir,
+            chunk_size=1,
+            num_workers=min(1, os.cpu_count() - 1),
+        )
+
+    def prepare_data(self) -> None:
+        if self.streaming_data_root is not None:
+            os.makedirs(self.streaming_data_root, exist_ok=True)
+            if not os.path.exists(train_dir := os.path.join(self.streaming_data_root, "train")):
+                # Create the optimized version of the train split
+                self._optimize_split(output_dir=train_dir, split="train")
+
+            if not os.path.exists(val_dir := os.path.join(self.streaming_data_root, "val")):
+                # Create the optimized version of the val split
+                self._optimize_split(output_dir=val_dir, split="val")
+
+            if not os.path.exists(test_dir := os.path.join(self.streaming_data_root, "test")):
+                # Create the optimized version of the val split
+                if not self.dataset.version == "v1.0-mini":
+                    self._optimize_split(output_dir=test_dir, split="test")
+
+            self.train_dataloader = self.train_dataloader_streaming
+            self.val_dataloader = self.val_dataloader_streaming
+            self.test_dataloader = self.test_dataloader_streaming
+            self.predict_dataloader = self.predict_dataloader_streaming
+
+    def train_dataloader_standard(self) -> DataLoader:
+        dataset = NuScenes(
+            db=self.nuscenes_database,
             dataset=self.dataset,
             load_annotations=True,
             augmentations=self.augmentations.get("train"),
@@ -685,9 +761,9 @@ class NuScenesDataModule(LightningDataModule):
         )
         return dataloader
 
-    def val_dataloader(self):
+    def val_dataloader_standard(self) -> DataLoader:
         dataset = NuScenes(
-            db=self.db,
+            db=self.nuscenes_database,
             dataset=self.dataset,
             load_annotations=True,
             augmentations=self.augmentations.get("val"),
@@ -707,19 +783,19 @@ class NuScenesDataModule(LightningDataModule):
         )
         return dataloader
 
-    def test_dataloader(self):
+    def test_dataloader_standard(self) -> DataLoader:
         """
         The test dataloader can only be used for actual testing by the NuScenes team as they do not provide the
         annotations.
         """
         dataset = NuScenes(
-            db=self.db,
+            db=self.nuscenes_database,
             dataset=self.dataset,
             load_annotations=False,
             augmentations=self.augmentations.get("test"),
             split="test",
         )
-        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=True)
+        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=False)
         dataloader = DataLoader(
             dataset=dataset,
             collate_fn=collate_fn,
@@ -733,9 +809,9 @@ class NuScenesDataModule(LightningDataModule):
         )
         return dataloader
 
-    def predict_dataloader(self):
+    def predict_dataloader_standard(self) -> DataLoader:
         dataset = NuScenes(
-            db=self.db,
+            db=self.nuscenes_database,
             dataset=self.dataset,
             load_annotations=False,
             augmentations=self.augmentations.get("predict"),
@@ -754,3 +830,80 @@ class NuScenesDataModule(LightningDataModule):
             **self.dataloader_kwargs,
         )
         return dataloader
+
+    def train_dataloader_streaming(self) -> StreamingDataLoader:
+        dataset = NuScenesStreamingDataset(
+            augmentations=self.augmentations.get("train"), input_dir=os.path.join(self.streaming_data_root, "train")
+        )
+        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=True)
+        dataloader = StreamingDataLoader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
+            shuffle=True,
+            drop_last=True,
+            pin_memory=self.pin_memory,
+            **self.dataloader_kwargs,
+        )
+        return dataloader
+
+    def val_dataloader_streaming(self) -> StreamingDataLoader:
+        dataset = NuScenesStreamingDataset(
+            augmentations=self.augmentations.get("val"), input_dir=os.path.join(self.streaming_data_root, "val")
+        )
+        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=True)
+        dataloader = StreamingDataLoader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+            **self.dataloader_kwargs,
+        )
+        return dataloader
+
+    def test_dataloader_streaming(self) -> StreamingDataLoader:
+        dataset = NuScenesStreamingDataset(
+            augmentations=self.augmentations.get("test"), input_dir=os.path.join(self.streaming_data_root, "test")
+        )
+        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=False)
+        dataloader = StreamingDataLoader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+            **self.dataloader_kwargs,
+        )
+        return dataloader
+
+    def predict_dataloader_streaming(self) -> StreamingDataLoader:
+        dataset = NuScenesStreamingDataset(
+            augmentations=self.augmentations.get("val"), input_dir=os.path.join(self.streaming_data_root, "val")
+        )
+        collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=False)
+        dataloader = StreamingDataLoader(
+            dataset=dataset,
+            collate_fn=collate_fn,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=self.persistent_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+            **self.dataloader_kwargs,
+        )
+        return dataloader
+
+    train_dataloader = train_dataloader_standard
+    val_dataloader = val_dataloader_standard
+    test_dataloader = test_dataloader_standard
+    predict_dataloader = predict_dataloader_standard
