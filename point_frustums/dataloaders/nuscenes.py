@@ -698,12 +698,22 @@ class NuScenesDataModule(LightningDataModule):
     def nuscenes_database(self):
         return NuScDB(version=self.dataset.version, dataroot=self.data_root, verbose=False)
 
+    @cached_property
+    def nuscenes_database_test(self):
+        version = self.dataset.version.rsplit("-")[0] + "-test"
+        return NuScDB(version=version, dataroot=self.data_root, verbose=False)
+
     def _optimize_split(self, output_dir, split: Literal["train", "val", "test"]):
         os.makedirs(output_dir)
         logger.info(f"Optimizing the {split} split of the NuScenes dataset into the directory {output_dir}")
         load_annotations = split in ("train", "val")
+        if split == "test":
+            database = self.nuscenes_database_test
+        else:
+            database = self.nuscenes_database
+
         dataset = NuScenes(
-            db=self.nuscenes_database,
+            db=database,
             dataset=self.dataset,
             load_annotations=load_annotations,
             augmentations=None,
