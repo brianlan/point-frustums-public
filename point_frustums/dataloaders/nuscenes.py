@@ -725,7 +725,7 @@ class NuScenesDataModule(LightningDataModule):
             inputs=list(range(len(dataset))),
             output_dir=output_dir,
             chunk_size=1,
-            num_workers=min(1, os.cpu_count() - 1),
+            num_workers=max(1, os.cpu_count() - 1),
         )
 
     def prepare_data(self) -> None:
