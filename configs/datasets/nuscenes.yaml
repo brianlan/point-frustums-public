@@ -4,6 +4,7 @@ init_args:
   num_workers: 3
   pin_memory: True
   persistent_workers: True
+  drop_last: False
   augmentations:
     train:
       - class_path: point_frustums.augmentations.Normalize

@@ -676,6 +676,7 @@ class NuScenesDataModule(LightningDataModule):
         num_workers: int = 0,
         pin_memory: bool = False,
         persistent_workers: bool = False,
+        drop_last: bool = True,
         **dataloader_kwargs,
     ):
         super().__init__()
@@ -687,6 +688,7 @@ class NuScenesDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
+        self.drop_last = drop_last
         self.dataloader_kwargs = dataloader_kwargs
 
         self.data_root = data_root_getter(
@@ -765,7 +767,7 @@ class NuScenesDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=self.persistent_workers,
             shuffle=True,
-            drop_last=True,
+            drop_last=self.drop_last,
             pin_memory=self.pin_memory,
             **self.dataloader_kwargs,
         )
@@ -853,7 +855,7 @@ class NuScenesDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=self.persistent_workers,
             shuffle=True,
-            drop_last=True,
+            drop_last=self.drop_last,
             pin_memory=self.pin_memory,
             **self.dataloader_kwargs,
         )
