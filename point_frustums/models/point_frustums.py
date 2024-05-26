@@ -923,6 +923,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             detections = self.get_detections(output=outputs["network_output"], ego_velocities=ego_velocities)
             nds = self.nds_train(detections, batch["targets"])
             self.log_dict(self.nds_train.log_dict(nds, mode="train"))
+            del nds
+            self.nds_train.reset()
             modified_frequency = self.logging.frequency_log_train_sample / self.trainer.log_every_n_steps  # NOQA
             self._post_pointcloud(batch, detections, logging_frequency=modified_frequency, prefix="Train")
 
