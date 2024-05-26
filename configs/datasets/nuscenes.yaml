@@ -1,7 +1,7 @@
 class_path: point_frustums.dataloaders.NuScenesDataModule
 init_args:
   batch_size: 8
-  num_workers: 3
+  num_workers: 6
   pin_memory: True
   persistent_workers: True
   drop_last: False
@@ -129,3 +129,4 @@ init_args:
         other: [ void ]
     load_velocity: True
     load_can: True
+    streaming_data_root: /teamspace/studios/nuscenes/data/lit_nuscenes
