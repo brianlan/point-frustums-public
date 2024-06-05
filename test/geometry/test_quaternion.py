@@ -8,6 +8,7 @@ from point_frustums.geometry.quaternion import (
     quaternion_zx_projection_angle,
     quaternion_xy_projection_angle,
     quaternion_and_axis_to_angle,
+    rotate_2d,
 )
 from point_frustums.geometry.rotation_matrix import (
     rz_from_yaw,
@@ -68,3 +69,28 @@ def test_quaternion_projection_angle():
     assert torch.allclose(
         quaternion_and_axis_to_angle(quaternions, xaxis), quaternion_yz_projection_angle(quaternions), **kwargs
     )
+
+
+def test_rotate_2d():
+    phi = torch.tensor([torch.pi / 4])
+    x = torch.tensor([[1.0, 0.0]])
+    result = rotate_2d(phi, x)
+    expected = torch.tensor([[0.7071, 0.7071]])
+    assert torch.allclose(result, expected, atol=1e-4)
+
+
+def test_project_2d():
+    phi = torch.tensor([torch.pi / 4])
+    x = torch.tensor([[1.0, 0.0]])
+    rotation_matrices = torch.stack(
+        (
+            phi.cos(),
+            -phi.sin(),
+            phi.sin(),
+            phi.cos(),
+        )
+    ).reshape(2, 2, -1)
+
+    expected = torch.einsum("ij,jki->ik", x, rotation_matrices).squeeze()
+    result = rotate_2d(-phi, x)
+    assert torch.allclose(result, expected, atol=1e-4)

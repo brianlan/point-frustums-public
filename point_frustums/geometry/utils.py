@@ -122,7 +122,7 @@ def get_featuremap_projection_boundaries(
     :param fov_azi:
     :param delta_pol:
     :param delta_azi:
-    :return:
+    :return: torch.tensor([x1, y1, x2, y2])
     """
     # Get 8 corner points of 3D boxes [N, 8, 3]
     corners = get_corners_3d(centers=centers, wlh=wlh, orientation=orientation)
