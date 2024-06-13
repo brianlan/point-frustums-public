@@ -220,7 +220,7 @@ class NuScenes(Dataset):
         sensor = self.db.get("calibrated_sensor", sample_data["calibrated_sensor_token"])
 
         # Add ego pose information to meta for later mapping back to global COOS
-        metadata = {"translation": ego["translation"], "rotation": ego["rotation"]}
+        metadata: dict[str, list] = {"translation": ego["translation"], "rotation": ego["rotation"]}
 
         # Make list of Box objects including coord system transforms.
         boxes_stacked = {"wlh": [], "center": [], "orientation": [], "velocity": [], "class": [], "attribute": []}
@@ -445,7 +445,7 @@ class NuScenes(Dataset):
         # Overwrite the points with the representation that contains the timestamps
         return np.concatenate((points, timestamps[None, :]), axis=0).astype(np.float32)
 
-    def get_sensor_to_global(self, sample_data: Mapping) -> np.ndarray:
+    def get_sensor_to_global(self, sample_data: dict[str, str]) -> np.ndarray:
         """
         Transform the pointcloud from the current COOS to the COOS of the reference sweep.
         :param sample_data:
@@ -491,9 +491,12 @@ class NuScenes(Dataset):
         # Initialize the sample_data_token to the reference token which is loaded first
         sample_data_token = ref_sample_data_token
 
+        # The idea behind two separate, consecutive loops was to enable asynchronous loading. Furthermore, merging the
+        # loops introduces an issue with the loop skipping upon error. The obvious workaround would be duplicate code.
         pc_files = []
         for _ in range(self.dataset.sensors[sensor_id].sweeps):
-            pc_files.append(self.db.get_sample_data_path(sample_data_token))
+            file = self.db.get_sample_data_path(sample_data_token)
+            pc_files.append((file, sample_data_token, sample_data))
             # Evaluate whether a previous sweep in the current scene exists
             if sample_data["prev"] == "":
                 break
@@ -501,7 +504,7 @@ class NuScenes(Dataset):
             sample_data_token = sample_data["prev"]
             sample_data = self.db.get("sample_data", sample_data_token)
 
-        for file in pc_files:
+        for file, sample_data_token, sample_data in pc_files:
             try:
                 pc = LidarPointCloud.from_file(file)
             except ValueError:
