@@ -1,10 +1,12 @@
 import torch
 
-from point_frustums.utils.custom_types import Boxes
+from point_frustums.utils.custom_types import Boxes, Targets
 from .quaternion import apply_quaternion_to_vector, apply_quaternion_to_2d_vector, apply_quaternion_to_quaternion
 
 
-def transform_boxes(boxes: Boxes, rotation: list[float], translation: list[float], rotate_first: bool = True) -> Boxes:
+def transform_boxes(
+    boxes: Boxes, rotation: list[float], translation: list[float], rotate_first: bool = True
+) -> Targets | Boxes:
     """
     Apply transformation to the boxes {center, orientation, velocity}. Translate then rotate.
     :param boxes:

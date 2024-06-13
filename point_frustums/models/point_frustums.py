@@ -624,7 +624,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
     ) -> dict[Literal["velocity"], torch.Tensor]:
         targets_velocity_fg = self._broadcast_targets(targets_velocity, targets_indices_fg)
 
-        # Broadcast the ego velocities to match the foreground vector
+        # Broadcast the ego velocity per sample to match the foreground vector
         ego_velocities = [v[None, :].repeat(i.numel(), 1) for i, v in zip(targets_indices_fg, ego_velocities)]
         ego_velocities = torch.cat(ego_velocities, dim=0)
 
