@@ -202,4 +202,4 @@ def render_target_assignment(
     pointcloud = wandb.Object3D(
         {"type": "lidar/beta", "points": np.array([[0.0, 0.0, 0.0]]), "boxes": np.array(targets_list + assignment_list)}
     )
-    wandb_logger.experiment.log({"Pointcloud": pointcloud}, commit=False)
+    wandb_logger.experiment.log({"Pointcloud": pointcloud}, commit=True)

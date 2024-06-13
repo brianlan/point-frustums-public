@@ -675,6 +675,7 @@ class NuScenesDataModule(LightningDataModule):
         predict_split: Literal["train", "val"] = "val",
         data_root: Optional[str] = None,
         streaming_data_root: Optional[str] = None,
+        streaming_chunk_size: int = 50,
         batch_size: int = 1,
         num_workers: int = 0,
         pin_memory: bool = False,
@@ -686,7 +687,8 @@ class NuScenesDataModule(LightningDataModule):
         self.dataset = dataset
         self.augmentations = augmentations
         self.predict_split = predict_split
-        self.streaming_data_root = os.path.abspath(streaming_data_root) if streaming_data_root is not None else None
+        self.streaming_data_root = os.path.abspath(os.path.expanduser(streaming_data_root)) if streaming_data_root is not None else None
+        self.streaming_chunk_size = streaming_chunk_size
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -729,8 +731,8 @@ class NuScenesDataModule(LightningDataModule):
             fn=dataset.__getitem__,
             inputs=list(range(len(dataset))),
             output_dir=output_dir,
-            chunk_size=1,
-            num_workers=max(1, os.cpu_count() - 1),
+            chunk_size=self.streaming_chunk_size,
+            num_workers=max(1, os.cpu_count()),
         )
 
     def prepare_data(self) -> None:
