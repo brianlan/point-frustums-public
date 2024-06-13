@@ -14,6 +14,7 @@ from point_frustums.geometry.rotation_matrix import (
     rz_from_yaw,
     rotation_matrix_to_quaternion,
     rotation_matrix_from_roll_pitch_yaw,
+    rotation_matrix_from_axis_angle,
 )
 
 
@@ -90,6 +91,16 @@ def test_project_2d():
             phi.cos(),
         )
     ).reshape(2, 2, -1)
+
+    expected = torch.einsum("ij,jki->ik", x, rotation_matrices).squeeze()
+    result = rotate_2d(-phi, x)
+    assert torch.allclose(result, expected, atol=1e-4)
+
+    n = 1000
+    phi = 2 * torch.pi * torch.rand((n,))
+    zaxis = torch.tensor([[0, 0, 1.0]])
+    x = 20 * torch.rand((n, 2))
+    rotation_matrices = rotation_matrix_from_axis_angle(axis=zaxis, angle=phi)[:, :2, :2].movedim(0, -1)
 
     expected = torch.einsum("ij,jki->ik", x, rotation_matrices).squeeze()
     result = rotate_2d(-phi, x)

@@ -46,3 +46,23 @@ def test_conversion_to_and_from_spherical():
 
     assert quaternion_allclose(quaternions, _rotation_matrix_to_quaternion(matrices), **allclose_kwargs)
     assert torch.allclose(matrices, _quaternion_to_rotation_matrix(quaternions), **allclose_kwargs)
+
+
+class TestRotation6DConversions:
+    def test_valid_6d_to_3x3_matrix(self):
+        d6 = torch.tensor([[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]])
+        expected_matrix = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]])
+        result_matrix = _rotation_6d_to_matrix(d6)
+        assert torch.allclose(result_matrix, expected_matrix, atol=1e-6)
+
+    def test_single_matrix_conversion(self):
+        matrix = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]])
+        expected_output = torch.tensor([1.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+        output = _matrix_to_rotation_6d(matrix)
+        assert torch.allclose(output, expected_output)
+
+    def test_matrix_to_6d_and_back(self):
+        expected_output = random_rotation_matrix(1000)
+        rotation_6d = _matrix_to_rotation_6d(expected_output)
+        output = _rotation_6d_to_matrix(rotation_6d)
+        assert torch.allclose(output, expected_output, atol=1e-6)
