@@ -28,6 +28,8 @@ class RandomFlipHorizontal(RandomAugmentation):
         # If data is flipped along one axis, the quaternion components of the other two axis need to be flipped
         self._dims = ("x", "y", "z")
         self.quaternion_flip_indices = [self._dims.index(dim) + 1 for dim in self._dims if dim != self.flip_along_cart]
+        # Set the index of the cartesian coordinate quantities that is affected by the flip
+        self.xyz_flip_channel_idx = self._dims.index(self.flip_along_cart)
 
     def _refresh(self):
         # No need to do anything, the data is either flipped or not
@@ -47,7 +49,7 @@ class RandomFlipHorizontal(RandomAugmentation):
 
     def targets(self, targets: Targets):
         # Flip the center along the specified axis
-        targets["center"][:, self._dims.index(self.flip_along_cart)] *= -1
+        targets["center"][:, self.xyz_flip_channel_idx] *= -1
 
         # Mirroring of the orientation along one axis is achieved by flipping the components of the other two axis.
         targets_quaternion = quaternion_from_rotation_matrix(targets["orientation"])
@@ -62,7 +64,7 @@ class RandomFlipHorizontal(RandomAugmentation):
 
     def metadata(self, metadata: MutableMapping):
         if "velocity" in metadata:
-            metadata["velocity"][self._dims.index(self.flip_along_cart)] *= -1
+            metadata["velocity"][self.xyz_flip_channel_idx] *= -1
 
         return metadata
 
@@ -100,7 +102,7 @@ class RandomRotate(RandomAugmentation):
 
     def lidar(self, data: torch.Tensor, metadata: Optional[MutableMapping]) -> torch.Tensor:
         data[..., self._dims_cart] = torch.einsum("ij,...j->...i", self._matrix, data[..., self._dims_cart])
-        data[..., self._azi_idx] = angle_to_neg_pi_to_pi(data[..., self._azi_idx])
+        data[..., self._azi_idx] = angle_to_neg_pi_to_pi(data[..., self._azi_idx] + self._angle)
         return data
 
     def targets(self, targets: Targets):
