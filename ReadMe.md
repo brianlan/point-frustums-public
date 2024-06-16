@@ -94,14 +94,14 @@ which are decoupled but conveniently grouped in a `LightningModule`.
 - The transformer based frustum feature encoder which resembles the one described in HVNet [13, 14]
 
 ## TODO
--[ ] Add output encoding to the documentation
--[ ] Finalize `torchmetrics` implementation of the NDS
--[ ] Implement CUDA kernel for 3D NMS
--[ ] Migrate remaining augmentations
--[ ] Provide results
--[ ] Support loading data and targets in EGO COOS
--[ ] Implement Camera to LiDAR fusion 
--[ ] Implement PointPillars and FCOS-LiDAR in the framework
+- [ ] Add output encoding to the documentation
+- [ ] Finalize `torchmetrics` implementation of the NDS
+- [x] Implement CUDA kernel for 3D NMS
+- [x] Migrate remaining augmentations
+- [ ] Provide results
+- [x] Support loading data and targets in EGO COOS
+- [ ] Implement Camera to LiDAR fusion 
+- [ ] Implement PointPillars and FCOS-LiDAR in the framework
 
 
 ## References

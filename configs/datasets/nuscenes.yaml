@@ -5,6 +5,8 @@ init_args:
   pin_memory: True
   persistent_workers: True
   drop_last: False
+  streaming_data_root: /teamspace/studios/point-frustums/datasets/lit_nuscenes
+  streaming_cache_size: 16GB
   augmentations:
     train:
       - class_path: point_frustums.augmentations.Normalize
@@ -82,7 +84,7 @@ init_args:
         orientation_degrees:
           polar: 0
           azimuthal: -90
-        sweeps: 7
+        sweeps: 10
       CAM_FRONT:
         active: False
         modality: camera
@@ -129,4 +131,3 @@ init_args:
         other: [ void ]
     load_velocity: True
     load_can: True
-    streaming_data_root: /teamspace/studios/nuscenes/data/lit_nuscenes

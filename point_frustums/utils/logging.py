@@ -5,6 +5,7 @@ from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger, Logger
 
 from point_frustums.augmentations.augmentations_other import de_normalize
 from point_frustums.config_dataclasses.dataset import Labels
+from point_frustums.utils.custom_types import Boxes, Targets
 from .plotting import plot_pointcloud_bev, plot_pointcloud_wandb
 
 
@@ -12,8 +13,8 @@ from .plotting import plot_pointcloud_bev, plot_pointcloud_wandb
 def log_pointcloud(
     logger: Logger,
     data: torch.Tensor,
-    targets: Optional[dict[str, torch.Tensor]],
-    detections: Optional[dict[str, torch.Tensor]],
+    targets: Optional[Targets],
+    detections: Optional[Boxes],
     label_enum: Optional[Labels] = None,
     augmentations_log: Optional[dict] = None,
     tag: str = "",
@@ -28,8 +29,8 @@ def log_pointcloud(
 
     #  Transfer everything to the CPU
     data = data.cpu()
-    detections = {k: v.cpu() for k, v in detections.items()}
-    targets = {k: v.cpu() for k, v in targets.items()}
+    detections: Boxes = {k: v.cpu() for k, v in detections.items()}
+    targets: Targets = {k: v.cpu() for k, v in targets.items()}
 
     if isinstance(logger, TensorBoardLogger):
         fig = plot_pointcloud_bev(points=data, targets=targets, detections=detections)

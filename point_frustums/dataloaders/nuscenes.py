@@ -676,6 +676,7 @@ class NuScenesDataModule(LightningDataModule):
         data_root: Optional[str] = None,
         streaming_data_root: Optional[str] = None,
         streaming_chunk_size: int = 50,
+        streaming_cache_size: int | str = "10GB",
         batch_size: int = 1,
         num_workers: int = 0,
         pin_memory: bool = False,
@@ -687,8 +688,11 @@ class NuScenesDataModule(LightningDataModule):
         self.dataset = dataset
         self.augmentations = augmentations
         self.predict_split = predict_split
-        self.streaming_data_root = os.path.abspath(os.path.expanduser(streaming_data_root)) if streaming_data_root is not None else None
+        self.streaming_data_root = (
+            os.path.abspath(os.path.expanduser(streaming_data_root)) if streaming_data_root is not None else None
+        )
         self.streaming_chunk_size = streaming_chunk_size
+        self.streaming_cache_size = streaming_cache_size
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -850,7 +854,9 @@ class NuScenesDataModule(LightningDataModule):
 
     def train_dataloader_streaming(self) -> StreamingDataLoader:
         dataset = NuScenesStreamingDataset(
-            augmentations=self.augmentations.get("train"), input_dir=os.path.join(self.streaming_data_root, "train")
+            augmentations=self.augmentations.get("train"),
+            input_dir=os.path.join(self.streaming_data_root, "train"),
+            max_cache_size=self.streaming_cache_size,
         )
         collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=True)
         dataloader = StreamingDataLoader(
@@ -868,7 +874,9 @@ class NuScenesDataModule(LightningDataModule):
 
     def val_dataloader_streaming(self) -> StreamingDataLoader:
         dataset = NuScenesStreamingDataset(
-            augmentations=self.augmentations.get("val"), input_dir=os.path.join(self.streaming_data_root, "val")
+            augmentations=self.augmentations.get("val"),
+            input_dir=os.path.join(self.streaming_data_root, "val"),
+            max_cache_size=self.streaming_cache_size,
         )
         collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=True)
         dataloader = StreamingDataLoader(
@@ -886,7 +894,9 @@ class NuScenesDataModule(LightningDataModule):
 
     def test_dataloader_streaming(self) -> StreamingDataLoader:
         dataset = NuScenesStreamingDataset(
-            augmentations=self.augmentations.get("test"), input_dir=os.path.join(self.streaming_data_root, "test")
+            augmentations=self.augmentations.get("test"),
+            input_dir=os.path.join(self.streaming_data_root, "test"),
+            max_cache_size=self.streaming_cache_size,
         )
         collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=False)
         dataloader = StreamingDataLoader(
@@ -904,7 +914,9 @@ class NuScenesDataModule(LightningDataModule):
 
     def predict_dataloader_streaming(self) -> StreamingDataLoader:
         dataset = NuScenesStreamingDataset(
-            augmentations=self.augmentations.get("val"), input_dir=os.path.join(self.streaming_data_root, "val")
+            augmentations=self.augmentations.get("val"),
+            input_dir=os.path.join(self.streaming_data_root, "val"),
+            max_cache_size=self.streaming_cache_size,
         )
         collate_fn = partial(partial_collate_fn, sensors=self.dataset.sensors, load_annotations=False)
         dataloader = StreamingDataLoader(
