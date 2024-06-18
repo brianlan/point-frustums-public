@@ -466,9 +466,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Initialize the center distance to all zeros
         center_distance = torch.zeros_like(binary_pre_mapping, dtype=torch.float)
         # Calculate the cartesian distances between predictions and mapped targets (prev.: the distance of radius)
-        center_distance[idx] = torch.abs(
-            feat_centers[idx[0], :].norm(dim=-1) - targets["center"][idx[1], :].norm(dim=-1)
-        )
+        center_distance[idx] = (feat_centers[idx[0], :] - targets["center"][idx[1], :]).norm(dim=-1)
         # Normalize the distance by a factor based on the target box size
         center_distance[idx] = center_distance[idx].div(targets["wlh"][idx[1], :].norm(dim=-1))
         # Squash the relative distance to the range [0, 1) by application of tanh
