@@ -9,17 +9,6 @@ init_args:
   streaming_cache_size: 16GB
   augmentations:
     train:
-      - class_path: point_frustums.augmentations.Normalize
-        init_args:
-          apply_to: [lidar]
-          lidar:
-            channels: [2, 3, 4, 5]  # [z, intensity, timestamp, radial]
-            mean: [ -0.729, 18.395, 0.243, 13.540 ]
-            std: [ 1.916, 19.789, 0.141, 12.564 ]
-          camera:
-            channels: [ 0, 1, 2 ]
-            mean: [ 123.675, 116.28, 103.53 ]
-            std: [ 58.395, 57.12, 57.375 ]
       - class_path: point_frustums.augmentations.SubsampleData
         init_args:
           apply_to: [lidar]
@@ -34,6 +23,17 @@ init_args:
           apply_to: [ lidar, targets ]
           dimension_mapping_lidar: { x: 0, y: 1, z: 2, azimuthal: 7 }
           probability: 0.8
+      - class_path: point_frustums.augmentations.Normalize
+        init_args:
+          apply_to: [lidar]
+          lidar:
+            channels: [2, 3, 4, 5]  # [z, intensity, timestamp, radial]
+            mean: [ -0.729, 18.395, 0.243, 13.540 ]
+            std: [ 1.916, 19.789, 0.141, 12.564 ]
+          camera:
+            channels: [ 0, 1, 2 ]
+            mean: [ 123.675, 116.28, 103.53 ]
+            std: [ 58.395, 57.12, 57.375 ]
     val:
       - class_path: point_frustums.augmentations.Normalize
         init_args:
