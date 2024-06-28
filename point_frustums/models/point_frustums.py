@@ -1,7 +1,7 @@
 import random
 from copy import deepcopy
 from functools import cached_property
-from math import prod, exp, isclose
+from math import prod, exp, isclose, ceil
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
@@ -961,7 +961,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             optimizer=optimizer,
             max_lr=lr,
             epochs=self.trainer.max_epochs,
-            steps_per_epoch=len(self.trainer.train_dataloader) // self.trainer.accumulate_grad_batches,
+            steps_per_epoch=ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches),
         )
         lr_scheduler_config = {
             "scheduler": lr_scheduler,
