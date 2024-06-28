@@ -319,9 +319,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
-        x[..., [1, 2]] -= center_pol_azi
-        x[..., 1] /= self.discretization.delta_pol
-        x[..., 2] /= self.discretization.delta_azi
+        x[..., 1] = (x[..., 1] - center_pol_azi[..., 0]) / self.discretization.delta_pol
+        x[..., 2] = (x[..., 2] - center_pol_azi[..., 1]) / self.discretization.delta_azi
         return x
 
     def _decode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -335,9 +334,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
-        x[..., 1] *= self.discretization.delta_pol
-        x[..., 2] *= self.discretization.delta_azi
-        x[..., [1, 2]] += center_pol_azi
+        x[..., 1] = (x[..., 1] * self.discretization.delta_pol) + center_pol_azi[..., 0]
+        x[..., 2] = (x[..., 2] * self.discretization.delta_azi) + center_pol_azi[..., 1]
         return x
 
     @staticmethod
