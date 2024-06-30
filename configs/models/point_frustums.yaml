@@ -75,8 +75,12 @@ init_args:
       weight: 2
       kwargs:
         beta: 0.2
-    center_angular:
-      weight: 2
+    center_polar:
+      weight: 1
+      kwargs:
+        beta: 0.5
+    center_azimuthal:
+      weight: 1
       kwargs:
         beta: 0.5
     orientation:

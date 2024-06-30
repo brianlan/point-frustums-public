@@ -560,7 +560,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         foreground_idx: torch.Tensor,
         targets_center: list[torch.Tensor],
         targets_indices_fg: list[torch.Tensor],
-    ) -> dict[Literal["center_radial", "center_angular"], torch.Tensor]:
+    ) -> dict[Literal["center_radial", "center_polar", "center_azimuthal"], torch.Tensor]:
         # Evaluate the loss imposed on the center coordinate
         targets_center_fg = cart_to_sph_torch(self._broadcast_targets(targets_center, targets_indices_fg))
         targets_center_fg = self._encode_center(targets_center_fg, idx_feat=foreground_idx)
@@ -570,13 +570,19 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             reduction="sum",
             **self.losses.center_radial.kwargs,
         )
-        center_angular = F.smooth_l1_loss(
-            input=predictions_center_fg[..., [1, 2]],
-            target=targets_center_fg[..., [1, 2]],
+        center_polar = F.smooth_l1_loss(
+            input=predictions_center_fg[..., 1],
+            target=targets_center_fg[..., 1],
             reduction="sum",
-            **self.losses.center_angular.kwargs,
+            **self.losses.center_polar.kwargs,
         )
-        return {"center_radial": center_radial, "center_angular": center_angular}
+        center_azimuthal = F.smooth_l1_loss(
+            input=predictions_center_fg[..., 2],
+            target=targets_center_fg[..., 2],
+            reduction="sum",
+            **self.losses.center_azimuthal.kwargs,
+        )
+        return {"center_radial": center_radial, "center_polar": center_polar, "center_azimuthal": center_azimuthal}
 
     def _loss_wlh(
         self,

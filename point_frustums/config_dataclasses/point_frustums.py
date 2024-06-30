@@ -42,7 +42,8 @@ class Losses:
     attribute: Loss
     vfl: Loss
     center_radial: Loss = Loss(kwargs={"beta": 0.2})
-    center_angular: Loss = Loss(kwargs={"beta": 0.5})
+    center_polar: Loss = Loss(kwargs={"beta": 0.5})
+    center_azimuthal: Loss = Loss(kwargs={"beta": 0.5})
     wlh: Loss = Loss()
     orientation: Loss = Loss(kwargs={"beta": 0.1})
     velocity: Loss = Loss()
