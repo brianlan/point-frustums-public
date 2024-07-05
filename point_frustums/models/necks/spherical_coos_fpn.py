@@ -13,7 +13,7 @@ class BottleneckRangeImage(Bottleneck):
     Modifies the standard Bottleneck block to use range image padding with the 3x3 convolution
     """
 
-    expansion = 2
+    expansion = 4
 
     def __init__(
         self,
@@ -84,6 +84,13 @@ class FPN(nn.Module):
         self.strides = {}
         self.up, self.lateral, self.down, self.post = self.build_layers()
         self.extra, self.extra_post = self.build_extra_layers()
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def _get_first_block(self, n_channels_in, n_channels, n_channels_out, stride):
         """
