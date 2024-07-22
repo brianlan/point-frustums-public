@@ -1,7 +1,7 @@
 import random
 from copy import deepcopy
 from functools import cached_property
-from math import prod, exp, isclose, ceil
+from math import prod, exp, isclose
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
@@ -961,16 +961,20 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         pass
 
     def configure_optimizers(self, *args, **kwargs):
-        lr = 1e-2
-        optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.05, amsgrad=True)
-        lr_scheduler = optim.lr_scheduler.OneCycleLR(
-            optimizer=optimizer,
-            max_lr=lr,
-            epochs=self.trainer.max_epochs,
-            steps_per_epoch=ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches),
-        )
+        lr = 2e-3
+        optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.05, amsgrad=False)
+        # lr_scheduler = optim.lr_scheduler.OneCycleLR(
+        #    optimizer=optimizer,
+        #    max_lr=lr,
+        #    epochs=self.trainer.max_epochs,
+        #    steps_per_epoch=ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches),
+        # )
+        n = 3
+        interval = self.trainer.max_epochs // n
+        milestones = [i * interval for i in range(n)]
+        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
         lr_scheduler_config = {
             "scheduler": lr_scheduler,
-            "interval": "step",
+            "interval": "epoch",
         }
         return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}

@@ -1,1 +1,2 @@
 from .nuscenes_submission import CreateNuScenesSubmission
+from .weight_initialization import ModelWeightsFromCheckpoint
