@@ -1,3 +1,4 @@
+import os
 import random
 from copy import deepcopy
 from functools import cached_property
@@ -101,6 +102,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
                 logger.experiment.add_custom_scalars(layout)
             elif isinstance(logger, pytorch_lightning.loggers.WandbLogger):
                 logger.experiment.watch(self.model, log_freq=100, log="all")
+                logger.experiment.log_code(
+                    ".", include_fn=lambda p: os.path.relpath(p).split("/")[0] in ("configs", "point_frustums")
+                )
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         checkpoint["Annotations"] = self.annotations.serialize()
