@@ -2,7 +2,7 @@ import os
 import random
 from copy import deepcopy
 from functools import cached_property
-from math import prod, exp, isclose
+from math import prod, exp, isclose, ceil
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
@@ -973,9 +973,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         #    epochs=self.trainer.max_epochs,
         #    steps_per_epoch=ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches),
         # )
-        n = 3
-        interval = self.trainer.max_epochs // n
-        milestones = [i * interval for i in range(n)]
+        n = 2
+        interval = ceil(self.trainer.max_epochs / (n + 1))
+        milestones = [i * interval for i in range(1, n + 1) if i < self.trainer.max_epochs]
         lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
         lr_scheduler_config = {
             "scheduler": lr_scheduler,
