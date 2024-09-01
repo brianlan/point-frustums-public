@@ -11,6 +11,10 @@ trainer:
   callbacks:
     - LearningRateMonitor
     #- RichProgressBar
+    - class_path: point_frustums.callbacks.WeightInitLSUV
+      init_args:
+        init_types: [ Linear, Conv1d, Conv2d ]
+        verbose: True
     #- point_frustums.callbacks.CreateNuScenesSubmission
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger

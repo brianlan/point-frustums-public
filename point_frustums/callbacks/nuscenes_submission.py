@@ -4,7 +4,7 @@ import os
 from collections import ChainMap
 from copy import deepcopy
 from datetime import timedelta
-from typing import Any
+from typing import Any, Optional
 
 import torch.distributed as dist
 from pytorch_lightning import Callback, Trainer, LightningModule
@@ -33,14 +33,16 @@ async def retrieve_boxes(
     default_timedelta = store.timeout
     store.set_timeout(timeout)
 
-    def get_boxes(key):
+    async def get_boxes_coroutine(key):
+        await asyncio.sleep(0)  # Yield control to the event loop
         try:
             val = json.loads(store.get(key))
-        except dist.DistStoreError:
+        except store.DistStoreError:  # Replace with actual error class if different
             val = []
         return {key: val}
 
-    results = await asyncio.gather(*[asyncio.to_thread(get_boxes, k) for k in keys])
+    tasks = [get_boxes_coroutine(k) for k in keys]
+    results = await asyncio.gather(*tasks)
 
     store.set_timeout(default_timedelta)
     return dict(ChainMap(*results))
@@ -126,23 +128,25 @@ class CreateNuScenesSubmission(Callback):
         self.use_external = use_external
         self.store = None
 
-    def on_epoch_start(self):
+    def on_epoch_start(self, log_dir: Optional[str] = None):
         if dist.is_initialized():
             master_addr = os.environ["MASTER_ADDR"]
             master_port = os.environ["MASTER_PORT"]
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             self.store = dist.TCPStore(master_addr, master_port, world_size, rank == 0)
+        elif log_dir is not None:
+            self.store = dist.FileStore(path=os.path.join(log_dir, "submission"))
         else:
             self.store = dist.HashStore()
 
     @override
     def on_test_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        self.on_epoch_start()
+        self.on_epoch_start(log_dir=trainer.log_dir)
 
     @override
     def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        self.on_epoch_start()
+        self.on_epoch_start(log_dir=trainer.log_dir)
 
     def on_batch_end(self, detections: list[Boxes], metadata: list[dict], annotations: Annotations):
         for sample_detections, sample_metadata in zip(detections, metadata):
