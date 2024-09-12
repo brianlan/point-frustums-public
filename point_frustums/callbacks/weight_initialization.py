@@ -46,41 +46,77 @@ class WeightInitLSUV(Callback):
 
     @staticmethod
     def _str_to_module(module_str: str) -> type:
+        """
+        Load the module instances from torch.nn by string.
+        :param module_str:
+        :return:
+        """
         try:
             return getattr(nn, module_str)
         except AttributeError as err:
             raise ValueError(f"Module {module_str} not found in torch.nn") from err
 
     @staticmethod
-    def _preprocess_batch(module: nn.Module, batch: torch.Tensor | dict) -> dict:
-        # Get the function's signature
+    def _preprocess_batch(module: nn.Module, batch: torch.Tensor | Sequence | dict) -> dict:
+        """
+        Pack all elements of the input batch into a dict to enable generic kwargs unpacking later on.
+        :param module:
+        :param batch:
+        :return:
+        """
+        # Get the function's signature and extract the names of the input args
         sig = inspect.signature(module.forward)
-
-        # Create a set of valid parameter names
         valid_params = set(sig.parameters.keys())
+
+        # Now pack the batch into a dict
         if isinstance(batch, torch.Tensor) and len(valid_params) == 1:
+            # A simple one to one mapping
             (param,) = valid_params
-            _batch = {param: batch}
-        else:
+            batch = {param: batch}
+        elif isinstance(batch, Sequence):
+            # Assuming we are dealing with *args, so just put them in order
             _batch = {}
-            for k in batch.keys():
-                if k in valid_params:
-                    _batch.update({k: batch[k]})
-        return _batch
+            for key, value in zip(valid_params, batch):
+                _batch[key] = value
+            batch = _batch
+        elif isinstance(batch, dict):
+            # If the input batch contains fields that are not meant for model.forward(), throw them out now
+            invalid_params = set(batch.keys()) - valid_params
+            for param in invalid_params:
+                batch.pop(param)
+
+        return batch
 
     def on_fit_start(self, trainer, pl_module):
+        """
+        Implement the hook that performs the initialization before the training loop is started.
+        :param trainer:
+        :param pl_module:
+        :return:
+        """
         # Get a mini-batch from the train dataloader
         batch = next(iter(trainer.train_dataloader))
-        inputs = batch[0] if isinstance(batch, (tuple, list)) else batch
-        inputs = move_data_to_device(inputs, device=pl_module.device)
+        batch = move_data_to_device(batch, device=pl_module.device)
+        self.apply_lsuv(pl_module, batch=batch)
 
-        self.apply_lsuv(pl_module, batch=inputs)
-
-    def apply_lsuv(self, model, batch: dict):
+    def apply_lsuv(self, model: nn.Module, batch: torch.Tensor | Sequence | dict):
+        """
+        Apply LSUV initialization to all nn.Modules of the specified types that are part of the overall model.
+        :param model:
+        :param batch:
+        :return:
+        """
         model.eval()
 
-        def lsuv_hook(module: nn.Module, input, output):
-            # TODO: For whatever reason, the input is packed into a tuple by torch
+        def lsuv_hook(module: nn.Module, input: tuple[torch.Tensor], output: torch.Tensor) -> torch.Tensor:
+            """
+            This hook shall be registered as forward hook to each of the nn.Modules that shall be initialized.
+            :param module:
+            :param input:
+            :param output:
+            :return:
+            """
+            # Unpack the solitary input arg
             (input,) = input
             with torch.no_grad():
                 nn.init.orthogonal_(module.weight)
