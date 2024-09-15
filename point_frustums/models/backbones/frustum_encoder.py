@@ -326,7 +326,7 @@ def decorator_relative_angle(pc_channel: torch.Tensor, delta_rad: float, std: Op
     :return:
     """
     # Normalize output by shifting to the frustum center and dividing by an (empirically estimated) standard deviation
-    angle = (torch.remainder(pc_channel, delta_rad) - (delta_rad / 2)) / delta_rad
+    angle = (pc_channel % delta_rad - (delta_rad / 2)) / delta_rad
     angle = angle / std
     return angle[:, None]
 
