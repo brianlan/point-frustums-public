@@ -299,7 +299,9 @@ def _create_ffn(n_channels: int, layers: Sequence[int], dropout: float = 0.1):
 def decorator_distance_to_mean(
     pc_channel: torch.Tensor,
     n_frustums: int,
+    counts_padded: torch.tensor,
     i_frustum: torch.Tensor,
+    i_unique: torch.Tensor,
     i_inv: torch.Tensor,
     std: Optional[float] = 1.0,
 ):
@@ -307,13 +309,16 @@ def decorator_distance_to_mean(
     :param pc_channel:
     :param n_frustums:
     :param i_frustum:
+    :param i_unique:
     :param i_inv:
     :param std: The normalization constant that scales the standard deviation to 1, determined empirically
     :return:
     """
     mean = torch.scatter_add(pc_channel.new_zeros((n_frustums,)), dim=0, index=i_frustum, src=pc_channel)
+    mask = counts_padded != 0
+    mean[mask] = mean[mask].div(counts_padded[mask])
     # Subset to the number of non-empty frustums (i_frustum) and then map the frustum mean value to the points (i_inv)
-    pc_channel = pc_channel - mean[i_frustum][i_inv]
+    pc_channel = pc_channel - mean[i_unique][i_inv]
     return (pc_channel / std)[:, None]
 
 
@@ -438,7 +443,23 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
         counts_padded[i_unique] = counts
         return i_unique, i_inv, counts, counts_padded
 
-    def apply_decorators(self, pc: torch.Tensor, i_frustum: torch.Tensor, i_inv: torch.Tensor) -> torch.Tensor:
+    def apply_decorators(
+        self,
+        pc: torch.Tensor,
+        counts_padded: torch.Tensor,
+        i_frustum: torch.Tensor,
+        i_unique: torch.Tensor,
+        i_inv: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Apply the configured decorator functions to obtain invariant features.
+        :param pc:
+        :param counts_padded:
+        :param i_frustum:
+        :param i_unique:
+        :param i_inv:
+        :return:
+        """
         decorated_channels = []
         for fn in self.decorate.functions:
             pc_channel = pc[:, self.channels_in.index(fn.channel)]
@@ -457,7 +478,9 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
                         decorator_distance_to_mean(
                             pc_channel=pc_channel,
                             n_frustums=self.discretize.n_splits,
+                            counts_padded=counts_padded,
                             i_frustum=i_frustum,
+                            i_unique=i_unique,
                             i_inv=i_inv,
                             std=fn.std,
                         )
@@ -526,7 +549,9 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
             pc, i_frustum = self.sort_by_frustum_index(pc, i_frustum)
             i_unique, i_inv, counts, counts_padded = self.get_frustum_stats(i_frustum)
             # Apply decorators to entire PC
-            decorated = self.apply_decorators(pc, i_frustum=i_frustum, i_inv=i_inv)
+            decorated = self.apply_decorators(
+                pc, counts_padded=counts_padded, i_frustum=i_frustum, i_unique=i_unique, i_inv=i_inv
+            )
             # Squash irregular number of points to regular array by applying symmetric function
             # PyTorch automatically assigns tensors C-contiguous which matches the creation of the global index
             features[i, :, :] = self.vectorize_and_squash(decorated, i_frustum, i_unique, i_inv, counts, counts_padded)
