@@ -22,6 +22,7 @@ def symmetrize_max(  # pylint: disable=too-many-arguments
     pc: torch.Tensor,
     n_frustums: int,
     i_frustum: torch.Tensor,
+    i_unique: torch.Tensor,
     i_inv: torch.Tensor,
     counts_padded: torch.Tensor,
     context: Dict[str, torch.Tensor],
@@ -50,6 +51,7 @@ def symmetrize_mean(  # pylint: disable=too-many-arguments
     pc: torch.Tensor,
     n_frustums: int,
     i_frustum: torch.Tensor,
+    i_unique: torch.Tensor,
     i_inv: torch.Tensor,
     counts_padded: torch.Tensor,
     context: Dict[str, torch.Tensor],
@@ -87,6 +89,7 @@ def symmetrize_std(  # pylint: disable=too-many-arguments
     pc: torch.Tensor,
     n_frustums: int,
     i_frustum: torch.Tensor,
+    i_unique: torch.Tensor,
     i_inv: torch.Tensor,
     counts_padded: torch.Tensor,
     context: Dict[str, torch.Tensor],
@@ -106,12 +109,18 @@ def symmetrize_std(  # pylint: disable=too-many-arguments
 
     if "mean" not in context:
         _, context = symmetrize_mean(
-            pc=pc, n_frustums=n_frustums, i_frustum=i_frustum, i_inv=i_inv, counts_padded=counts_padded, context=context
+            pc=pc,
+            n_frustums=n_frustums,
+            i_frustum=i_frustum,
+            i_unique=i_unique,
+            i_inv=i_inv,
+            counts_padded=counts_padded,
+            context=context,
         )
     mean = context["mean"]
     n_points, n_channels = pc.shape
 
-    pc = pc.sub(mean[i_frustum, :][i_inv, :])
+    pc = pc.sub(mean[i_unique, :][i_inv, :])
     pc = pc.square()
 
     std = pc.new_zeros((n_frustums, n_channels))
@@ -494,6 +503,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
         pc: torch.Tensor,
         n_frustums: int,
         i_frustum: torch.Tensor,
+        i_unique: torch.Tensor,
         i_inv: torch.Tensor,
         counts_padded: torch.Tensor,
     ) -> Sequence[torch.Tensor]:
@@ -504,6 +514,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
                 pc=pc,
                 n_frustums=n_frustums,
                 i_frustum=i_frustum,
+                i_unique=i_unique,
                 i_inv=i_inv,
                 counts_padded=counts_padded,
                 context=context,
@@ -529,6 +540,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
                     pc=self.ffn_vectorize(pc),
                     n_frustums=self.discretize.n_splits,
                     i_frustum=i_frustum,
+                    i_unique=i_unique,
                     i_inv=i_inv,
                     counts_padded=counts_padded,
                 )
