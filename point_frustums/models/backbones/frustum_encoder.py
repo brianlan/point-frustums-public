@@ -317,6 +317,7 @@ def decorator_distance_to_mean(
     """
     :param pc_channel:
     :param n_frustums:
+    :param counts_padded:
     :param i_frustum:
     :param i_unique:
     :param i_inv:
@@ -350,7 +351,7 @@ class FrustumEncoder(nn.Module):  # pylint: disable=too-many-instance-attributes
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
-        channels_in: list[str, ...],
+        channels_in: Sequence[str],
         discretize: ConfigDiscretize,
         decorate: ConfigDecorate,
         vectorize: ConfigVectorize,

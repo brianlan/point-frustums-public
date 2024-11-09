@@ -287,7 +287,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return self.get_buffer("feat_rfs_centers")
 
     @property
-    def feature_vectors_angular_centers(self):
+    def feature_vectors_angular_centers(self) -> torch.Tensor:
         """
         The {theta, phi}-coordinate corresponding to the featuremap location.
         :return:
@@ -565,6 +565,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         targets_center: list[torch.Tensor],
         targets_indices_fg: list[torch.Tensor],
     ) -> dict[Literal["center_radial", "center_polar", "center_azimuthal"], torch.Tensor]:
+        """
+        Evaluate the Smooth L1 loss on each of the coordinate components.
+
+        Firstly, broadcast the targets to match the predictions that were assigned foreground, then apply the encoding
+        to the targets and lastly compute the loss.
+        :param predictions_center_fg:
+        :param foreground_idx:
+        :param targets_center:
+        :param targets_indices_fg:
+        :return:
+        """
         # Evaluate the loss imposed on the center coordinate
         targets_center_fg = cart_to_sph_torch(self._broadcast_targets(targets_center, targets_indices_fg))
         targets_center_fg = self._encode_center(targets_center_fg, idx_feat=foreground_idx)
