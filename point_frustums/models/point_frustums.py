@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import os
 import random
 from copy import deepcopy
@@ -314,7 +315,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
     def _encode_center(self, x: torch.Tensor, *, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Encode the M spherical center coordinates w.r.t. the angular position of the feature vectors.
+        Encode the M spherical center coordinates w.r.t. the angular position of the feature vectors. Scale the angular
+        delta furthermore with the distance.
         :param x:
         :param idx_feat:
         :return:
@@ -323,13 +325,23 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
-        x[..., 1] = (x[..., 1] - center_pol_azi[..., 0]) / self.discretization.delta_pol
-        x[..., 2] = (x[..., 2] - center_pol_azi[..., 1]) / self.discretization.delta_azi
+        # TODO: One approach to improve the convergence of the angular center could be to scale with radial distance.
+        #   1. Either I scale the encoding component, then I have to adjust the decoding equivalently, this I can
+        #      motivate with the analogy of using the length of the opposite leg to the angle rather than the angle
+        #   2. Or I just scale the loss (only possible if I use reduction=None and apply the reduction explicitly)
+        #   Option 1 is equivalent to  using the distance in a cartesian COOS, whilst option two still predicts an
+        #   angle but penalizes more distant targets stronger. In either way, I'll multiply with the radial distance
+        #   and probably divide with a factor in order to balance the different loss components. One last thing would be
+        #   consider removing the scaling with the frustum angle. This would imply that in a more finely resolved
+        #   discretization, the angular loss components become less relevant.
+        x[..., 1] = (x[..., 1] - center_pol_azi[..., 0]) * x[..., 0]
+        x[..., 2] = (x[..., 2] - center_pol_azi[..., 1]) * x[..., 0]
         return x
 
     def _decode_center(self, x: torch.Tensor, idx_feat: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Decode the M spherical center coordinates w.r.t. the angular position of the feature vectors.
+        Decode the M spherical center coordinates w.r.t. the angular position of the feature vectors. Scale the angular
+        delta furthermore with the distance.
         :param x:
         :param idx_feat:
         :return:
@@ -338,8 +350,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
         x = x.clone()
-        x[..., 1] = (x[..., 1] * self.discretization.delta_pol) + center_pol_azi[..., 0]
-        x[..., 2] = (x[..., 2] * self.discretization.delta_azi) + center_pol_azi[..., 1]
+        x[..., 1] = (x[..., 1] / x[..., 0]) + center_pol_azi[..., 0]
+        x[..., 2] = (x[..., 2] / x[..., 0]) + center_pol_azi[..., 1]
         return x
 
     @staticmethod
