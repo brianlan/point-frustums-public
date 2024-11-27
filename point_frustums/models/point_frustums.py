@@ -349,10 +349,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         center_pol_azi = self.feature_vectors_angular_centers
         if idx_feat is not None:
             center_pol_azi = center_pol_azi[idx_feat, :]
-        x = x.clone()
-        x[..., 1] = (x[..., 1] / x[..., 0]) + center_pol_azi[..., 0]
-        x[..., 2] = (x[..., 2] / x[..., 0]) + center_pol_azi[..., 1]
-        return x
+        rad, pol, azi = x.detach().tensor_split(3, dim=-1)
+        rad = rad.clamp(min=1e-3)
+        return torch.cat((rad, pol / rad + center_pol_azi[..., [0]], azi / rad + center_pol_azi[..., [1]]), dim=-1)
 
     @staticmethod
     def _encode_wlh(x: torch.Tensor) -> torch.Tensor:
