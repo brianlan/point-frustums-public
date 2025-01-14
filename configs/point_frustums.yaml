@@ -6,8 +6,8 @@ trainer:
   max_epochs: 16
   log_every_n_steps: 5
   accumulate_grad_batches: 4
-  gradient_clip_val: 50
-  gradient_clip_algorithm: norm
+  #gradient_clip_val: 50
+  #gradient_clip_algorithm: norm
   callbacks:
     - LearningRateMonitor
     #- RichProgressBar
@@ -15,6 +15,9 @@ trainer:
       init_args:
         init_types: [ Linear, Conv1d, Conv2d ]
         verbose: True
+    - class_path: point_frustums.callbacks.GradientClipping
+      init_args:
+        clip_value: 50.0
     #- point_frustums.callbacks.CreateNuScenesSubmission
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
