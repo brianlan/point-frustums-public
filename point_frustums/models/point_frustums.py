@@ -3,7 +3,7 @@ import os
 import random
 from copy import deepcopy
 from functools import cached_property
-from math import prod, exp, isclose, ceil
+from math import prod, exp, isclose, ceil, inf
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
@@ -28,6 +28,7 @@ from point_frustums.geometry.rotation_matrix import (
     rotation_matrix_from_rotation_6d,
 )
 from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
+from point_frustums.metrics.detection.featuremap_level_assignments import FeaturemapLevelAssignments
 from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.custom_types import Targets
@@ -72,6 +73,14 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self.nds_train: Optional[NuScenesDetectionScore] = None
         self.nds_val: Optional[NuScenesDetectionScore] = None
         self._annotations = None
+
+        self.featuremap_assignment_count = FeaturemapLevelAssignments(num_levels=len(self.model.neck.fpn.strides))
+        self._fm_idx_bounds_lower, self._fm_idx_bounds_upper = self._get_featuremap_bounds()
+
+    def _get_featuremap_bounds(self) -> tuple[torch.Tensor, torch.Tensor]:
+        lower = torch.tensor([0] + self.featuremap_parametrization.layer_sizes_flat).cumsum(0)[None, :]
+        upper = torch.tensor(self.featuremap_parametrization.layer_sizes_flat + [inf]).cumsum(0)[None, :]
+        return lower, upper
 
     def setup(self, *args, **kwargs):
         # Required to access the dataloader at setup time:
@@ -672,6 +681,17 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
         return {"velocity": velocity}
 
+    def _log_featuremap_assignments(self, indices: torch.Tensor) -> None:
+        lower, upper = self._fm_idx_bounds_lower, self._fm_idx_bounds_upper
+        assignments = (indices[:, None] > lower)[:, :-1] * (indices[:, None] <= upper)[:, 1:]
+        self.featuremap_assignment_count(assignments.sum(dim=0))
+        counts = self.featuremap_assignment_count.compute()
+        self.log_dict(
+            {f"Metric/FeaturemapLevelAssignments/{k}": v for k, v in enumerate(counts)},
+            on_step=True,
+            on_epoch=False,
+        )
+
     @staticmethod
     def _flatten_output_channels_last(output: dict[str, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         # Flatten the last 2 dimensions of all predictions featuremaps, swap dimensions  and concatenate
@@ -746,6 +766,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         targets_label = torch.stack(targets_label, dim=0)
         targets_attribute = torch.stack(targets_attribute, dim=0)
         targets_iou = torch.stack(targets_iou, dim=0).detach()
+
+        self._log_featuremap_assignments(foreground_idx)
 
         # Evaluate the losses that are applied to the entire featuremap (class/attribute/IoU)
         losses = {
