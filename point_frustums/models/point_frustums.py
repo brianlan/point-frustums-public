@@ -3,7 +3,7 @@ import os
 import random
 from copy import deepcopy
 from functools import cached_property
-from math import prod, exp, isclose, ceil, inf
+from math import prod, exp, isclose, ceil
 from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
@@ -75,12 +75,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self._annotations = None
 
         self.featuremap_assignment_count = FeaturemapLevelAssignments(num_levels=len(self.model.neck.fpn.strides))
-        self._fm_idx_bounds_lower, self._fm_idx_bounds_upper = self._get_featuremap_bounds()
+        self._register_featuremap_bounds()
 
-    def _get_featuremap_bounds(self) -> tuple[torch.Tensor, torch.Tensor]:
-        lower = torch.tensor([0] + self.featuremap_parametrization.layer_sizes_flat).cumsum(0)[None, :]
-        upper = torch.tensor(self.featuremap_parametrization.layer_sizes_flat + [inf]).cumsum(0)[None, :]
-        return lower, upper
+    def _register_featuremap_bounds(self) -> None:
+        featuremap_bounds = torch.tensor([0] + self.featuremap_parametrization.layer_sizes_flat).cumsum(0)
+        self.register_buffer("_fm_idx_bounds_lower", featuremap_bounds[None, :-1])
+        self.register_buffer("_fm_idx_bounds_upper", featuremap_bounds[None, 1:])
 
     def setup(self, *args, **kwargs):
         # Required to access the dataloader at setup time:
@@ -569,7 +569,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return match_index
 
     @staticmethod
-    def _broadcast_targets(targets: list[torch.Tensor], indices: list[torch.tensor]) -> torch.Tensor:
+    def _broadcast_targets(targets: list[torch.Tensor], indices: list[torch.Tensor]) -> torch.Tensor:
         """
         Index-select targets that correspond to the foreground predictions and concatenate samples from the batch.
         :param targets:
@@ -682,15 +682,11 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return {"velocity": velocity}
 
     def _log_featuremap_assignments(self, indices: torch.Tensor) -> None:
-        lower, upper = self._fm_idx_bounds_lower, self._fm_idx_bounds_upper
-        assignments = (indices[:, None] > lower)[:, :-1] * (indices[:, None] <= upper)[:, 1:]
+        lower, upper = self.get_buffer("_fm_idx_bounds_lower"), self.get_buffer("_fm_idx_bounds_upper")
+        assignments = (indices[:, None] >= lower) * (indices[:, None] < upper)
         self.featuremap_assignment_count(assignments.sum(dim=0))
         counts = self.featuremap_assignment_count.compute()
-        self.log_dict(
-            {f"Metric/FeaturemapLevelAssignments/{k}": v for k, v in enumerate(counts)},
-            on_step=True,
-            on_epoch=False,
-        )
+        self.log_dict({f"Metric/FeaturemapLevelAssignments/{k}": v for k, v in enumerate(counts)}, reduce_fx="sum")
 
     @staticmethod
     def _flatten_output_channels_last(output: dict[str, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -1010,19 +1006,31 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
 
     def configure_optimizers(self, *args, **kwargs):
         lr = 2e-3
-        optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.05, amsgrad=False)
-        # lr_scheduler = optim.lr_scheduler.OneCycleLR(
-        #    optimizer=optimizer,
-        #    max_lr=lr,
-        #    epochs=self.trainer.max_epochs,
-        #    steps_per_epoch=ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches),
-        # )
-        n = 2
-        interval = ceil(self.trainer.max_epochs / (n + 1))
-        milestones = [i * interval for i in range(1, n + 1) if i < self.trainer.max_epochs]
-        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+        optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.01, amsgrad=False)
+        steps_per_epoch = ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches)
+        steps_total = self.trainer.estimated_stepping_batches
+        lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer=optimizer,
+            max_lr=lr,
+            epochs=self.trainer.max_epochs,
+            steps_per_epoch=steps_per_epoch,
+        )
+        # n = 2
+        # interval = ceil(self.trainer.max_epochs / (n + 1))
+        # milestones = [i * interval for i in range(1, n + 1) if i < self.trainer.max_epochs]
+        # lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+
+        # lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        #   optimizer=optimizer,
+        #   T_0=ceil(2.5*steps_per_epoch),
+        #   T_mult=2,
+        #   eta_min=1e-7)
+        # lr_scheduler = optim.lr_scheduler.ConstantLR(
+        #   optimizer=optimizer,
+        #   total_iters=self.trainer.max_epochs,
+        #   factor=1.0)
         lr_scheduler_config = {
             "scheduler": lr_scheduler,
-            "interval": "epoch",
+            "interval": "step",
         }
         return {"optimizer": optimizer, "lr_scheduler": lr_scheduler_config}

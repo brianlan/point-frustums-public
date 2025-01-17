@@ -101,5 +101,5 @@ init_args:
     score_threshold: 0.1
     nms_threshold: 0.4
   logging:
-    frequency_log_train_sample: 3000
-    frequency_log_val_sample: 1000
+    frequency_log_train_sample: 10000
+    frequency_log_val_sample: 3000

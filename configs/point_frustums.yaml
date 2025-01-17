@@ -8,6 +8,7 @@ trainer:
   accumulate_grad_batches: 4
   #gradient_clip_val: 50
   #gradient_clip_algorithm: norm
+  check_val_every_n_epoch: 1
   callbacks:
     - LearningRateMonitor
     #- RichProgressBar
@@ -17,8 +18,11 @@ trainer:
         verbose: True
     - class_path: point_frustums.callbacks.GradientClipping
       init_args:
-        clip_value: 50.0
+        clip_value: 1.0
     #- point_frustums.callbacks.CreateNuScenesSubmission
+    #- class_path: point_frustums.callbacks.ModelWeightsFromCheckpoint
+    #  init_args:
+    #    checkpoint_path: training_logs/lightning_logs/version_47/checkpoints/epoch=6-step=6160.ckpt
   logger:
     - class_path: pytorch_lightning.loggers.TensorBoardLogger
       init_args:
@@ -28,3 +32,5 @@ trainer:
         project: point_frustums
         save_dir: training_logs
         offline: False
+
+seed_everything: 42
