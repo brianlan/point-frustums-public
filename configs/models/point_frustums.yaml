@@ -19,10 +19,10 @@ init_args:
                 functions:
                   - { id: relative_angle, channel: azimuthal, std: 0.29 }
                   - { id: relative_angle, channel: polar, std: 0.29 }
-                  - { id: distance_to_mean, channel: radial, std: 0.24 }
-                  - { id: distance_to_mean, channel: x, std: 2.1 }
-                  - { id: distance_to_mean, channel: y, std: 2.1 }
-                  - { id: distance_to_mean, channel: z, std: 0.14 }
+                  - { id: distance_to_mean, channel: radial, std: 0.55 }
+                  - { id: distance_to_mean, channel: x, std: 5 }
+                  - { id: distance_to_mean, channel: y, std: 5 }
+                  - { id: distance_to_mean, channel: z, std: 0.3 }
                 channels_out: [ z, intensity, timestamp, radial, delta_azi, delta_pol, delta_r, delta_x, delta_y, delta_z ]
               vectorize:
                 layers: [ 128 ]
