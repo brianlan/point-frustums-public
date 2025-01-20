@@ -308,7 +308,7 @@ def _create_ffn(n_channels: int, layers: Sequence[int], dropout: float = 0.1):
 def decorator_distance_to_mean(
     pc_channel: torch.Tensor,
     n_frustums: int,
-    counts_padded: torch.tensor,
+    counts_padded: torch.Tensor,
     i_frustum: torch.Tensor,
     i_unique: torch.Tensor,
     i_inv: torch.Tensor,

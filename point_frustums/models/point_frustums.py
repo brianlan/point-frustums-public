@@ -682,7 +682,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         return {"velocity": velocity}
 
     def _log_featuremap_assignments(self, indices: torch.Tensor) -> None:
-        if not self.training:
+        if not self.trainer.training:
             return
 
         lower, upper = self.get_buffer("_fm_idx_bounds_lower"), self.get_buffer("_fm_idx_bounds_upper")
