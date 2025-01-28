@@ -1027,7 +1027,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         pass
 
     def configure_optimizers(self, *args, **kwargs):
-        lr = 2e-3
+        lr = 5e-3
         optimizer = optim.AdamW(params=self.parameters(), lr=lr, weight_decay=0.01, amsgrad=False)
         steps_per_epoch = ceil(len(self.trainer.train_dataloader) / self.trainer.accumulate_grad_batches)
         steps_total = self.trainer.estimated_stepping_batches
@@ -1036,6 +1036,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             max_lr=lr,
             epochs=self.trainer.max_epochs,
             steps_per_epoch=steps_per_epoch,
+            div_factor=50,
+            final_div_factor=1e4,
         )
         # n = 2
         # interval = ceil(self.trainer.max_epochs / (n + 1))
