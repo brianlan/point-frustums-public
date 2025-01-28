@@ -8,6 +8,7 @@ from typing import Literal, Optional, Any
 
 import pytorch_lightning.loggers
 import torch
+from ot.unbalanced import sinkhorn_unbalanced_translation_invariant
 from torch import nn, optim
 from torch.nn import functional as F
 from torchvision.ops import sigmoid_focal_loss
@@ -44,7 +45,7 @@ from .base_runtime import Detection3DRuntime
 from .heads import PointFrustumsHead
 from .necks import PointFrustumsNeck
 from .training.losses import vfl
-from .training.target_assignment import match_target_projection_to_receptive_field, sinkhorn
+from .training.target_assignment import match_target_projection_to_receptive_field
 
 
 class PointFrustumsModel(Detection3DModel):
@@ -549,14 +550,15 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         supply = torch.cat((supply, unassigned_supply[None]))
 
         # Evaluate the transport plan PI of the optimal transport problem (Comprehensive read: arXiv:1803.00567 p 62-84)
-        # The implemented algorithm is a version by renown researchers from the field but tricky to derive
-        pi = sinkhorn(
-            cost=cost,
-            row_marginals=demand,
-            col_marginals=supply,
-            eps=self.target_assignment.epsilon,
-            threshold=self.target_assignment.threshold,
-            iter_max=self.target_assignment.max_iter,
+        pi = sinkhorn_unbalanced_translation_invariant(
+            a=demand,
+            b=supply,
+            M=cost,
+            reg=self.target_assignment.epsilon,
+            reg_m=(1.0, 1.0),  # Relax the supply marginal and mildly relax also the demand marginal
+            reg_type="kl",
+            stopThr=self.target_assignment.threshold,
+            numItermax=self.target_assignment.max_iter,
         )
 
         # Rescale s.t. the maximum pi for each target equals 1.

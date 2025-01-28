@@ -99,6 +99,7 @@ setup(
         "prettytable",
         "PyYaml",
         "wandb",
+        "POT[backend-torch]",
     ],
     extras_require={"dev": ["pytest", "pylint", "pre-commit", "black", "pycln"], "test": ["pytest"]},
     ext_modules=get_extensions(),
