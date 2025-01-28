@@ -521,6 +521,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         # Shift by the factors beta and gamma to ensure that the pre-assigned background will have no smaller cost than
         # any point on the foreground ever
         cost_background += self.target_assignment.beta + self.target_assignment.gamma
+        cost_background += 1e-1
 
         # Combine classification/regression and background cost
         cost_classification = cost_classification.tanh()
@@ -528,7 +529,7 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         cost_classification[~binary_pre_mapping] = cost_classification[~binary_pre_mapping].clamp(min=min_fg_cost)
 
         # Initialize to the bias which ensures that the background is never assigned lower cost than the foreground
-        cost = (self.target_assignment.beta + self.target_assignment.gamma) * (~binary_pre_mapping).float()
+        cost = (self.target_assignment.beta + self.target_assignment.gamma) * (~binary_pre_mapping).float() + 2e-1
         # Add the scaled classification cost
         cost += self.target_assignment.alpha * cost_classification
         # Add the scaled IoU cost
