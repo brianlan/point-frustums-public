@@ -64,10 +64,11 @@ init_args:
     alpha: 1.0
     beta: 1
     gamma: 1.5
-    max_iter: 1000
+    max_iter: 10000
     min_k: 3
     max_k: 30
-    epsilon: 1.5e-1
+    epsilon: 1.0e-1
+    threshold: 1e-3
   losses:
     label:
       weight: 2
