@@ -13,3 +13,29 @@ class FeaturemapLevelAssignments(Metric):
 
     def compute(self) -> torch.Tensor:
         return self.level_assignment_count
+
+
+class PreassignmentOutflows(Metric):
+    # pylint: disable=no-member
+    def __init__(self):
+        super().__init__()
+        self.add_state("outflow", default=torch.zeros(1).int(), dist_reduce_fx="sum")
+
+    def update(self, count) -> None:  # pylint: disable=arguments-differ
+        self.outflow += count
+
+    def compute(self) -> torch.Tensor:
+        return self.outflow
+
+
+class MissedTargets(Metric):
+    # pylint: disable=no-member
+    def __init__(self):
+        super().__init__()
+        self.add_state("missed_targets", default=torch.zeros(1).int(), dist_reduce_fx="sum")
+
+    def update(self, count: int | torch.Tensor) -> None:  # pylint: disable=arguments-differ
+        self.missed_targets += count
+
+    def compute(self) -> torch.Tensor:
+        return self.missed_targets

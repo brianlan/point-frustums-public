@@ -28,7 +28,11 @@ from point_frustums.geometry.rotation_matrix import (
     rotation_matrix_from_rotation_6d,
 )
 from point_frustums.geometry.utils import get_corners_3d, get_featuremap_projection_boundaries, iou_vol_3d
-from point_frustums.metrics.detection.featuremap_level_assignments import FeaturemapLevelAssignments
+from point_frustums.metrics.detection.featuremap_level_assignments import (
+    FeaturemapLevelAssignments,
+    MissedTargets,
+    PreassignmentOutflows,
+)
 from point_frustums.metrics.detection.nds import NuScenesDetectionScore
 from point_frustums.ops.nms import nms_3d
 from point_frustums.utils.custom_types import Targets
@@ -75,12 +79,18 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         self._annotations = None
 
         self.featuremap_assignment_count = FeaturemapLevelAssignments(num_levels=len(self.model.neck.fpn.strides))
+        self.preassignment_outflows = PreassignmentOutflows()
+        self.missed_targets = MissedTargets()
+        self._register_featuremap_arange()
         self._register_featuremap_bounds()
 
     def _register_featuremap_bounds(self) -> None:
         featuremap_bounds = torch.tensor([0] + self.featuremap_parametrization.layer_sizes_flat).cumsum(0)
         self.register_buffer("_fm_idx_bounds_lower", featuremap_bounds[None, :-1])
         self.register_buffer("_fm_idx_bounds_upper", featuremap_bounds[None, 1:])
+
+    def _register_featuremap_arange(self) -> None:
+        self.register_buffer("_fm_arange", torch.arange(self.featuremap_parametrization.total_size))
 
     def setup(self, *args, **kwargs):
         # Required to access the dataloader at setup time:
@@ -558,6 +568,10 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         foreground_index = match_index != binary_pre_mapping.shape[1]
         match_index[~foreground_index] = -1
 
+        if self.trainer.training:
+            self.preassignment_outflows((~binary_pre_mapping[foreground_index, match_index[foreground_index]]).sum())
+            self.missed_targets(binary_pre_mapping.shape[1] - (match_index.unique().numel() - 1))
+
         if self.logging.render_target_assignment:
             render_target_assignment(
                 target_corners=target_corners,
@@ -689,7 +703,11 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         assignments = (indices[:, None] >= lower) * (indices[:, None] < upper)
         self.featuremap_assignment_count(assignments.sum(dim=0))
         counts = self.featuremap_assignment_count.compute()
-        self.log_dict({f"Metric/FeaturemapLevelAssignments/{k}": v for k, v in enumerate(counts)}, reduce_fx="sum")
+        self.log_dict({f"TargetAssignments/Level {k}": v for k, v in enumerate(counts)}, reduce_fx="sum")  # NOQA
+        missed_targets = self.missed_targets.compute()
+        outflows = self.preassignment_outflows.compute()
+        self.log("TargetAssignments/Missed Targets", missed_targets, reduce_fx="sum")
+        self.log("TargetAssignments/Number of Outflows", outflows, reduce_fx="sum")
 
     @staticmethod
     def _flatten_output_channels_last(output: dict[str, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
