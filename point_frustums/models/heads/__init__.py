@@ -7,6 +7,20 @@ from point_frustums.ops.spherical_coos_convolutions import Conv2dSpherical
 from ..base_models import Head
 
 
+class ResidualBlock(nn.Module):
+    def __init__(self, n_channels: int, num_groups: int, dropout: float = 0.0):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Dropout2d(dropout),
+            Conv2dSpherical(n_channels, n_channels, kernel_size=3),
+            nn.GroupNorm(num_groups, n_channels),
+        )
+        self.activation = nn.GELU()
+
+    def forward(self, x):
+        return self.activation(x + self.conv(x))
+
+
 class PointFrustumsHead(Head):
     def __init__(
         self,
@@ -52,15 +66,13 @@ class PointFrustumsHead(Head):
         assert isclose(self.n_channels_in % self.norm_group_size, 0)
         n_normalization_groups = self.n_channels_in // self.norm_group_size
 
-        layers = []
+        layers = nn.Sequential()
         for _ in range(n_convolutions):
-            layers.append(nn.Dropout2d(self.dropout))
-            layers.append(Conv2dSpherical(self.n_channels_in, self.n_channels_in, kernel_size=3))
-            layers.append(nn.GroupNorm(n_normalization_groups, self.n_channels_in))
-            layers.append(nn.GELU())
+            layers.append(
+                ResidualBlock(n_channels=self.n_channels_in, num_groups=n_normalization_groups, dropout=self.dropout)
+            )
         layers.append(nn.Dropout(self.dropout))
         layers.append(Conv2dSpherical(self.n_channels_in, n_channels_out, kernel_size=1))
-        layers = nn.Sequential(*layers)
 
         head = nn.ModuleList()
         for _ in self.layers_in:
