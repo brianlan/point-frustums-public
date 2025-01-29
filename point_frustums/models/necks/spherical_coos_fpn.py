@@ -216,6 +216,6 @@ class FPN(nn.Module):
         for layer, down, post in zip(self.names_layers_reversed[1:], self.down, self.post):
             results[layer] += down(input)
             input = results[layer]
-            results[layer] = post(results[layer])
+            results[layer] = post(results[layer]) + results[layer]
 
         return results
