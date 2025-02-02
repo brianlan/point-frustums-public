@@ -20,7 +20,7 @@ def vfl(
     # Masks for branch-less-style programming of terms 1 and 2
     t1 = torch.gt(targets, 0.0).float()
     t2 = torch.le(targets, 0.0).float()
-    focal_weight = targets * t1 + alpha * (predictions.sigmoid() - targets).abs().pow(gamma) * t2
+    focal_weight = targets * t1 + alpha * (predictions.sigmoid() - targets).abs().add(1e-6).pow(gamma) * t2
     loss = focal_weight * torch.nn.functional.binary_cross_entropy_with_logits(predictions, targets, reduction="none")
     if reduction == "sum":
         loss = loss.sum()
