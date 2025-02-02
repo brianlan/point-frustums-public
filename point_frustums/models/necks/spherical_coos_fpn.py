@@ -161,7 +161,7 @@ class FPN(nn.Module):
                 down[prev] = nn.Upsample(scale_factor=layer.stride, mode=self.upsampling_mode)
                 post[prev] = nn.Sequential(
                     nn.Dropout2d(self.dropout),
-                    Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3),
+                    Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, bias=False),
                     self.norm_layer(self.n_channels_out),
                 )
             prev = name
@@ -190,7 +190,7 @@ class FPN(nn.Module):
             extra_layers_post.append(
                 nn.Sequential(
                     nn.Dropout2d(self.dropout),
-                    Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3),
+                    Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3, bias=False),
                     self.norm_layer(self.n_channels_out),
                 )
             )

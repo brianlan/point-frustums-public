@@ -12,7 +12,7 @@ class ResidualBlock(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Dropout2d(dropout),
-            Conv2dSpherical(n_channels, n_channels, kernel_size=3),
+            Conv2dSpherical(n_channels, n_channels, kernel_size=3, bias=False),
             nn.GroupNorm(num_groups, n_channels),
         )
         self.activation = nn.GELU()
