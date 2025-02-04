@@ -189,5 +189,5 @@ def iou_vol_3d(boxes1: torch.Tensor, boxes2: torch.Tensor) -> tuple[torch.Tensor
             f"Invalid input shapes {boxes1.shape}, {boxes2.shape}; please provide either both as "
             f"[N, 8, 3] or boxes1.shape==[N,1,8,3] and boxes2.shape==[1,M,8,3]."
         )
-
+    iou = iou.nan_to_num(neginf=0.0, posinf=0.0).clamp(min=0.0, max=1.0).detach()
     return iou, vol
