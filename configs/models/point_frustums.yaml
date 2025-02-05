@@ -94,6 +94,7 @@ init_args:
     vfl:
       active: True
       weight: 1.0
+      from_epoch: 10
     attribute:
       active: True
       weight: 1.0

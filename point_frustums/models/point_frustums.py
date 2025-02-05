@@ -845,8 +845,9 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             if key == "class":
                 key = "label"
             loss_config = getattr(self.losses, key)
-            if loss_config.active:
-                loss.append(loss_config.weight * val)
+            if not loss_config.active or self.trainer.current_epoch < loss_config.from_epoch:
+                continue
+            loss.append(loss_config.weight * val)
         return torch.stack(loss, dim=0).sum(dim=0)
 
     @staticmethod
@@ -871,7 +872,12 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
         """
         output = self._flatten_output_channels_last(output=output)
 
-        score = torch.sigmoid(output["class"] + self.predictions.score_vfl_factor * output["vfl"])
+        score_vfl_factor = self.predictions.score_vfl_factor
+        loss_config = getattr(self.losses, "vfl")
+        if not loss_config.active or self.trainer.current_epoch < loss_config.from_epoch:
+            score_vfl_factor = 0.0
+
+        score = torch.sigmoid(output["class"] + score_vfl_factor * output["vfl"])
         batch_size = score.shape[0]
 
         # Get the indices of outputs that surpass the confidence threshold:

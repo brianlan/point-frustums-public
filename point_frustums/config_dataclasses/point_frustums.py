@@ -33,6 +33,7 @@ class Logging:
 class Loss:
     active: bool = True
     weight: float = 1.0
+    from_epoch: int = 0
     kwargs: dict = field(default_factory=dict)
 
 
