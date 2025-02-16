@@ -58,7 +58,10 @@ class BottleneckRangeImage(Bottleneck):
 
 class FPN(nn.Module):
     block = BottleneckRangeImage
-    norm_layer = nn.BatchNorm2d
+
+    @staticmethod
+    def norm_layer(num_channels):
+        return nn.GroupNorm(num_groups=8, num_channels=num_channels)
 
     def __init__(
         self,
@@ -102,7 +105,7 @@ class FPN(nn.Module):
         if stride != 1 or n_channels_in != n_channels_out:
             downsample = nn.Sequential(
                 conv1x1(n_channels_in, n_channels_out, stride),
-                self.norm_layer(n_channels_out),
+                self.norm_layer(num_channels=n_channels_out),
             )
         block = self.block(
             inplanes=n_channels_in,
@@ -142,17 +145,23 @@ class FPN(nn.Module):
             )
             n_channels_out = layer.n_channels * self.block.expansion
             # Step 1: The first block of each layer is a special case as it optionally performs the downsampling
-            layers = [
-                nn.Dropout2d(self.dropout),
-                self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, layer.stride),
-            ]
+            up[name] = nn.Sequential()
+            up[name].append(nn.Dropout2d(self.dropout))
+            up[name].append(self.norm_layer(num_channels=n_channels_in))
+            up[name].append(self._get_first_block(n_channels_in, layer.n_channels, n_channels_out, layer.stride))
             # Step 2: Add the remaining blocks (no stride/downsampling)
             for _ in range(1, layer.n_blocks):
-                layers.append(nn.Dropout2d(self.dropout))
-                layers.append(self.block(n_channels_out, layer.n_channels, norm_layer=self.norm_layer))
-            up[name] = nn.Sequential(*layers)
+                up[name].append(nn.Dropout2d(self.dropout))
+                up[name].append(self.norm_layer(num_channels=n_channels_out))
+                up[name].append(self.block(n_channels_out, layer.n_channels, norm_layer=self.norm_layer))
+
             # Step 3: Build the lateral connection (Conv2D) and the top-down-path upsampling layer (interpolate)
-            lateral[name] = nn.Sequential(nn.Dropout(self.dropout), conv1x1(n_channels_out, self.n_channels_out))
+            lateral[name] = nn.Sequential(
+                nn.Dropout(self.dropout),
+                self.norm_layer(num_channels=n_channels_out),
+                conv1x1(n_channels_out, self.n_channels_out),
+                self.norm_layer(num_channels=self.n_channels_out),
+            )
             n_channels_in = n_channels_out
 
             if prev is not None:
@@ -161,8 +170,9 @@ class FPN(nn.Module):
                 down[prev] = nn.Upsample(scale_factor=layer.stride, mode=self.upsampling_mode)
                 post[prev] = nn.Sequential(
                     nn.Dropout2d(self.dropout),
+                    self.norm_layer(num_channels=self.n_channels_out),
                     Conv2dSpherical(self.n_channels_out, self.n_channels_out, kernel_size=3, bias=False),
-                    self.norm_layer(self.n_channels_out),
+                    self.norm_layer(num_channels=self.n_channels_out),
                 )
             prev = name
 
@@ -184,14 +194,14 @@ class FPN(nn.Module):
                 nn.Sequential(
                     nn.Dropout(self.dropout),
                     Conv2dSpherical(n_channels_in, n_channels_in, kernel_size=3, stride=layer.stride),
-                    self.norm_layer(n_channels_in),
+                    self.norm_layer(num_channels=n_channels_in),
                 )
             )
             extra_layers_post.append(
                 nn.Sequential(
                     nn.Dropout2d(self.dropout),
                     Conv2dSpherical(n_channels_in, self.n_channels_out, kernel_size=3, bias=False),
-                    self.norm_layer(self.n_channels_out),
+                    self.norm_layer(num_channels=self.n_channels_out),
                 )
             )
             prev = name
