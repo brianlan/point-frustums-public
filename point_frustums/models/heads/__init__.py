@@ -12,6 +12,7 @@ class ResidualBlock(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Dropout2d(dropout),
+            nn.GroupNorm(num_groups, n_channels),
             Conv2dSpherical(n_channels, n_channels, kernel_size=3, bias=False),
             nn.GroupNorm(num_groups, n_channels),
         )
@@ -72,6 +73,7 @@ class PointFrustumsHead(Head):
                 ResidualBlock(n_channels=self.n_channels_in, num_groups=n_normalization_groups, dropout=self.dropout)
             )
         layers.append(nn.Dropout(self.dropout))
+        layers.append(nn.GroupNorm(n_normalization_groups, self.n_channels_in))
         layers.append(Conv2dSpherical(self.n_channels_in, n_channels_out, kernel_size=1))
 
         head = nn.ModuleList()
