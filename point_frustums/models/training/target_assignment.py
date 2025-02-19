@@ -7,8 +7,8 @@ def match_target_projection_to_receptive_field(
     rf_sizes: torch.Tensor,
     layer_sizes_flat: list[int],
     base_featuremap_width: int,
-    alpha: float = 1.4,
-    beta: float = 0.4,
+    upper_bound_multiplier: float = 1.4,
+    lower_bound_multiplier: float = 0.4,
 ) -> torch.Tensor:
     """
     Create a binary mapping between a set of N feature vectors with corresponding receptive fields (RFs) and M projected
@@ -22,12 +22,12 @@ def match_target_projection_to_receptive_field(
     :param rf_sizes: The sizes of the receptive fields [N, 2]
     :param layer_sizes_flat: The number of feature vectors on each featuremap layer
     :param base_featuremap_width: The width of the lowest level featuremap in the azimuthal direction
-    :param alpha: Controls the upper bound of the RF size when matching (w.r.t. longer edge of the projection)
-        `alpha=1`   -> Matched RFs are at most as large as targets.
-        `alpha=2`   -> Matched RFs are at most twice as large as targets.
-    :param beta: Controls the lower bound of the RF size when matching (w.r.t. shorter edge of the projection)
-        `beta=0.5`  -> Matched RFs are at least half as large as targets.
-        `beta=1`    -> Matched RFs are at least as large as targets.
+    :param upper_bound_multiplier: Controls the upper bound of the RF size when matching (longer edge of projection)
+        `upper_bound_multiplier=1`   -> Matched RFs are at most as large as targets.
+        `upper_bound_multiplier=2`   -> Matched RFs are at most twice as large as targets.
+    :param lower_bound_multiplier: Controls the lower bound of the RF size when matching (shorter edge of projection)
+        `lower_bound_multiplier=0.5` -> Matched RFs are at least half as large as targets.
+        `lower_bound_multiplier=1`   -> Matched RFs are at least as large as targets.
     :return: Boolean mask of shape [N, M] for N feature vectors and M targets.
     """
     # Calculate the target sizes and centers
@@ -55,16 +55,16 @@ def match_target_projection_to_receptive_field(
 
     # Condition the binary_mapping further on the sizes of the RFs
     # Scale the RFs by alpha and beta to use as lower/upper bounds
-    lower_bound = rf_sizes.min(dim=1).values / alpha
-    upper_bound = rf_sizes.max(dim=1).values / beta
+    min_rf_size = rf_sizes.min(dim=1).values
+    max_rf_size = rf_sizes.max(dim=1).values
     # Set the lower bounds smallest RF size to 0 to make sure that very small targets are not filtered out
-    lower_bound[: layer_sizes_flat[0]] = 0
+    min_rf_size[: layer_sizes_flat[0]] = 0
     # Set the upper bounds largest RF size to inf to make sure that very large targets are not filtered out
-    upper_bound[-layer_sizes_flat[-1] :] = torch.inf  # NOQA: Whitespace before ":"
-    # Evaluate longer edge of the target projection against the lower_bound
-    binary_match &= torch.le(lower_bound[:, None], targets_sizes.max(dim=1).values[None, :])
-    # Evaluate shorter edge of the target projection against the upper_bound
-    binary_match &= torch.ge(upper_bound[:, None], targets_sizes.min(dim=1).values[None, :])
+    max_rf_size[-layer_sizes_flat[-1] :] = torch.inf  # NOQA: Whitespace before ":"
+    # Evaluate longer edge of the target projection against the min_rf_size
+    binary_match &= min_rf_size[:, None] <= (upper_bound_multiplier * targets_sizes.max(dim=1).values[None, :])
+    # Evaluate shorter edge of the target projection against the max_rf_size
+    binary_match &= max_rf_size[:, None] >= (lower_bound_multiplier * targets_sizes.min(dim=1).values[None, :])
 
     return binary_match
 

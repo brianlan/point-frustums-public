@@ -78,6 +78,10 @@ class TargetAssignment:
     # The maximum number of iterations to perform
     max_iter: int = 2500
 
+    # Configure the upper and lower bound multipliers for the RF sizes assigned to targets
+    upper_bound_multiplier: float = 1.4
+    lower_bound_multiplier: float = 0.4
+
 
 @dataclass(slots=True, kw_only=True)
 class ConfigDiscretize:

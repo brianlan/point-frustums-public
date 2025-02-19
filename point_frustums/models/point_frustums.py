@@ -486,6 +486,8 @@ class PointFrustums(Detection3DRuntime):  # pylint: disable=too-many-ancestors
             rf_sizes=self.receptive_fields_sizes,
             layer_sizes_flat=self.featuremap_parametrization.layer_sizes_flat,
             base_featuremap_width=self.discretization.n_splits_azi,
+            upper_bound_multiplier=self.target_assignment.upper_bound_multiplier,
+            lower_bound_multiplier=self.target_assignment.lower_bound_multiplier,
         )
 
         # Get the indices that map between feature vectors and targets
