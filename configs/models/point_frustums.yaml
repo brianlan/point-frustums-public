@@ -69,8 +69,8 @@ init_args:
     max_k: 30
     epsilon: 1.0e-1
     threshold: 1e-3
-    upper_bound_multiplier: 3.0
-    lower_bound_multiplier: 0.8
+    upper_bound_multiplier: 1.5
+    lower_bound_multiplier: 0.9
   losses:
     label:
       weight: 2
