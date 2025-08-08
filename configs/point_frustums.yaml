@@ -23,7 +23,7 @@ trainer:
         save_on_train_epoch_end: False
         auto_insert_metric_name: False
         every_n_epochs: 1
-    - #- LearningRateFinder
+    # - #- LearningRateFinder
       #- class_path: point_frustums.callbacks.GradientClipping
       #  init_args:
       #    clip_value: 1.0
