@@ -23,6 +23,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from copious.io.fs import parent_ensured_path
 from nuscenes import NuScenes
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
@@ -41,11 +42,13 @@ def cart_to_sph_numpy(points: np.ndarray) -> np.ndarray:
     Returns:
         Array of shape (N, 3) with [radius, polar, azimuthal] coordinates
     """
+    # FIXME: import matplotlib.pyplot as plt; plt.hist(points[:, 2], bins=100); plt.savefig('z_hist.png')
     coos_sph = np.empty(points.shape, dtype=np.float32)
     xy = points[:, 0] ** 2 + points[:, 1] ** 2  # squared distance to observer in ground projection
     coos_sph[:, 0] = np.sqrt(xy + points[:, 2] ** 2)  # Radial distance
-    coos_sph[:, 1] = np.arctan2(np.sqrt(xy), points[:, 2])  # Polar/inclination angle (from Z-axis down)
+    coos_sph[:, 1] = np.arctan2(points[:, 2], np.sqrt(xy))  # Polar/inclination angle (from Z-axis down)
     coos_sph[:, 2] = np.arctan2(points[:, 1], points[:, 0])  # Azimuth angle
+    # FIXME: import matplotlib.pyplot as plt; plt.hist(coos_sph[:, 1], bins=30); plt.savefig('elevation_hist.png')
     return coos_sph
 
 
@@ -169,6 +172,19 @@ class RangeViewConverter:
                 # Transform: sensor -> global -> reference_sensor
                 pc.transform(np.dot(global2sensor, sensor2global))
             
+            # Filter out points on the ego car: convert to reference ego frame, apply mask, convert back to sensor frame
+            # reference sensor -> reference ego
+            pc.transform(sensor2ego)
+            x_ego = pc.points[0, :]
+            y_ego = pc.points[1, :]
+            mask = np.logical_not(
+                (y_ego < 3.2) & (y_ego > -2.2) &
+                (x_ego < 0.8) & (x_ego > -0.8)
+            )
+            pc.points = pc.points[:, mask]
+            # reference ego -> reference sensor
+            pc.transform(ego2sensor)
+            
             # Add timestamp information
             timestamp_sample = pd.to_datetime(sample_data["timestamp"], utc=True, unit="us", origin="unix")
             time_diff = (timestamp_sample - timestamp_reference).total_seconds()
@@ -201,7 +217,7 @@ class RangeViewConverter:
         
         return points[mask]
     
-    def get_frustum_indices(self, points: np.ndarray) -> np.ndarray:
+    def get_frustum_indices(self, points: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Get frustum indices for each point."""
         azimuthal = points[:, 7]  # azimuthal angle
         polar = points[:, 6]      # polar angle
@@ -216,7 +232,7 @@ class RangeViewConverter:
         
         return i_azi, i_pol
     
-    def create_range_image(self, points: np.ndarray, aggregation: str = "max") -> np.ndarray:
+    def create_range_image(self, points: np.ndarray, aggregation: str = "closest") -> np.ndarray:
         """
         Create range view image from point cloud.
         
@@ -324,14 +340,25 @@ def save_range_view_image(
     range_image: np.ndarray, 
     output_path: str, 
     title: str = "Range View",
-    colormap: str = "viridis"
+    colormap: str = "viridis",
+    fov_azi_deg: Tuple[float, float] = (-180.0, 180.0)
 ):
-    """Save range view as image file."""
+    """Save range view as image file with azimuth degree ticks on x-axis."""
     plt.figure(figsize=(12, 4))
     plt.imshow(range_image, aspect='auto', cmap=colormap, origin='lower')
     plt.colorbar(label='Distance (m)')
     plt.title(title)
-    plt.xlabel('Azimuth (bins)')
+    
+    # Set azimuth ticks/labels in degrees on the x-axis
+    n_cols = range_image.shape[1]
+    left_deg, right_deg = float(fov_azi_deg[0]), float(fov_azi_deg[1])
+    # Choose a reasonable number of ticks
+    num_ticks = 9 if n_cols >= 256 else 5
+    tick_labels = np.linspace(left_deg, right_deg, num=num_ticks)
+    tick_positions = (tick_labels - left_deg) / (right_deg - left_deg) * (n_cols - 1)
+    plt.xticks(tick_positions, [f"{int(a)}°" for a in tick_labels])
+    
+    plt.xlabel('Azimuth (deg)')
     plt.ylabel('Elevation (bins)')
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
@@ -342,15 +369,16 @@ def save_range_view_data(
     range_image: np.ndarray,
     intensity_image: np.ndarray,
     output_path: str,
-    metadata: dict = None
+    metadata: Optional[dict] = None
 ):
     """Save range view data as numpy file."""
     data = {
         'range': range_image,
         'intensity': intensity_image,
     }
-    if metadata:
-        data['metadata'] = metadata
+    if metadata is not None:
+        # Store metadata as an object array to satisfy numpy typing
+        data['metadata'] = np.array(metadata, dtype=object)
     
     np.savez_compressed(output_path, **data)
 
@@ -358,7 +386,7 @@ def save_range_view_data(
 def main():
     parser = argparse.ArgumentParser(description="Convert NuScenes LiDAR to range view images")
     parser.add_argument("--nuscenes_root", required=True, help="Path to NuScenes dataset root")
-    parser.add_argument("--output_dir", required=True, help="Output directory for range view images")
+    parser.add_argument("--output_dir", type=Path, required=True, help="Output directory for range view images")
     parser.add_argument("--split", choices=["train", "val", "test"], default="val", help="Dataset split")
     parser.add_argument("--version", default="v1.0-trainval", help="NuScenes version")
     parser.add_argument("--n_splits_azi", type=int, default=512, help="Azimuthal resolution")
@@ -373,15 +401,6 @@ def main():
     parser.add_argument("--max_samples", type=int, help="Maximum number of samples to process")
     
     args = parser.parse_args()
-    
-    # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    if args.save_images:
-        (output_dir / "images").mkdir(exist_ok=True)
-    if args.save_data:
-        (output_dir / "data").mkdir(exist_ok=True)
     
     # Initialize NuScenes
     print(f"Loading NuScenes {args.version} from {args.nuscenes_root}")
@@ -399,22 +418,20 @@ def main():
     )
     
     # Get samples for the specified split
-    train_scenes, val_scenes, test_scenes = create_splits_scenes()
+    # scene_splits = create_splits_scenes()
     
-    if args.split == "train":
-        scene_names = train_scenes
-    elif args.split == "val":
-        scene_names = val_scenes
-    elif args.split == "test":
-        scene_names = test_scenes
-    else:
-        raise ValueError(f"Invalid split: {args.split}")
+    # if args.version == "v1.0-mini":
+    #     scene_names = scene_splits[f'mini_{args.split}']
+    # elif args.version == "v1.0-trainval":
+    #     scene_names = scene_splits[args.split]
+    # else:    
+    #     raise ValueError(f"Invalid split ({args.split}) and version ({args.version}) combination.")
+    
+    # available_scenes = sorted(set(scene_names) & set(s['name'] for s in db.scene))
     
     # Get sample tokens
     sample_tokens = []
-    for scene_name in scene_names:
-        scene = next(s for s in db.scene if s['name'] == scene_name)
-        
+    for scene in db.scene:
         # Iterate through samples in scene
         sample_token = scene['first_sample_token']
         while sample_token:
@@ -443,20 +460,22 @@ def main():
             base_filename = f"{sample_token}_{i:06d}"
             
             if args.save_images:
-                # Save range image
+                # Save range image to its own subfolder
                 save_range_view_image(
                     range_image, 
-                    output_dir / "images" / f"{base_filename}_range.png",
+                    str(parent_ensured_path(args.output_dir / "images" / "range" / f"{base_filename}_range.png")),
                     title=f"Range View - {sample_token}",
-                    colormap="plasma"
+                    colormap="plasma",
+                    fov_azi_deg=tuple(args.fov_azi_deg)
                 )
                 
-                # Save intensity image
+                # Save intensity image to its own subfolder
                 save_range_view_image(
                     intensity_image,
-                    output_dir / "images" / f"{base_filename}_intensity.png", 
+                    str(parent_ensured_path(args.output_dir / "images" / "intensity" / f"{base_filename}_intensity.png")), 
                     title=f"Intensity View - {sample_token}",
-                    colormap="gray"
+                    colormap="gray",
+                    fov_azi_deg=tuple(args.fov_azi_deg)
                 )
             
             if args.save_data:
@@ -474,7 +493,7 @@ def main():
                 save_range_view_data(
                     range_image,
                     intensity_image,
-                    output_dir / "data" / f"{base_filename}.npz",
+                    str(parent_ensured_path(args.output_dir / "data" / f"{base_filename}.npz")),
                     metadata
                 )
                 
@@ -482,7 +501,7 @@ def main():
             print(f"Error processing sample {sample_token}: {e}")
             continue
     
-    print(f"Completed! Results saved to {output_dir}")
+    print(f"Completed! Results saved to {args.output_dir}")
 
 
 if __name__ == "__main__":
